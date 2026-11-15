@@ -1,14 +1,14 @@
 import os
 import secrets
 from threading import Lock
-from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi import FastAPI, Header, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from .core import Store, demo
 from .sources import discover, monitor
 from .integrations import notify, sheet_sync, recommendation
 from . import applications
 
-app = FastAPI(title='AI Internship Assistant', version='0.1.0')
+app = FastAPI(title='AI Internship Assistant', version='0.2.0')
 lock = Lock()
 
 def auth(authorization: str = Header(default='')):
@@ -39,6 +39,16 @@ def opportunities():
 @app.get('/companies', dependencies=[Depends(auth)])
 def companies():
     return run(lambda s:s.all('companies'))
+
+@app.get('/discovery/status', dependencies=[Depends(auth)])
+def discovery_status():
+    from .discovery_store import DiscoveryStore
+    return run(lambda s: DiscoveryStore(s).status())
+
+@app.get('/discovery/candidates', dependencies=[Depends(auth)])
+def discovery_candidates(limit: int = Query(default=100, ge=1, le=1000)):
+    from .discovery_store import DiscoveryStore
+    return run(lambda s: DiscoveryStore(s).candidates(limit))
 
 @app.post('/discover', dependencies=[Depends(auth)])
 def discovery():

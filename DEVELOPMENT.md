@@ -8,7 +8,7 @@ Work in this checkout. Do not edit the older `internship-finder` project or any 
 
 ## Adding organizations and opportunities
 
-Edit `config/sources.json`, preserving explicit public source URLs and cities. Include startups, SMEs, banks, hospitals, research/government organizations, and any relevant technical departments. `priority` controls human review priority; it does not remove lower-priority targets. Add reviewed opportunity selectors as described in SETUP. The company discovery step discovers career links, but does not automatically crawl them or invent vacancies. Review and add them to config. Keep unverified targets distinct from opportunities. Do not commit personal contact data; institutional publicly listed emails only.
+Edit `config/sources.json`, preserving explicit public source URLs and cities. Include startups, SMEs, banks, hospitals, research/government organizations, and any relevant technical departments. `priority` controls human review priority; it does not remove lower-priority targets. Add reviewed opportunity selectors as described in SETUP. Broad discovery now searches Brave/Wikidata, incrementally follows relevant official career/contact links, and extracts structured internships or explicitly uncertain announcements. Reviewed source selectors remain supported. Provider settings, query coverage, safeguards, budgets and extension interfaces are documented in [docs/DISCOVERY.md](docs/DISCOVERY.md). Keep unverified targets distinct from opportunities. Do not commit personal contact data; institutional publicly listed emails only.
 
 To add an adapter, extend sources.py behind the same fetcher policies and core.validate schema. Test title changes, absent selectors, blocked robots, missing dates, ambiguous eligibility, pagination, duplicate URLs, and disappearance. Never treat a score or COOP label as eligibility evidence. Avoid broad exception swallowing without reporting per-source errors.
 
@@ -16,7 +16,7 @@ To change data structures, add a migration path and backups before modifying tab
 
 ## Workflows
 
-`python docs/generate_workflows.py` regenerates the four inactive n8n workflow files. Credentials are intentionally absent; select Header Auth after importing. Community Edition compatibility avoids paid Variables and uses literal editable API URLs. No workflow deploys itself or sends email. When changing workflow node versions, test imports against the target n8n release before claiming compatibility. For unattended error alerts, configure your existing n8n error-workflow policy manually after review; API/source failures are otherwise visible in executions and returned error arrays.
+`python docs/generate_workflows.py` regenerates the four inactive n8n workflow files using schedules/timezone in config/discovery.json. It never edits deployed workflows. Discovery runs every four hours by default, and syncs the discovery/company results to Sheets. Credentials are intentionally absent; select Header Auth after importing. Community Edition compatibility avoids paid Variables and uses literal editable API URLs. No workflow deploys itself or sends email. When changing workflow node versions, test imports against the target n8n release before claiming compatibility. For unattended error alerts, configure your existing n8n error-workflow policy manually after review; API/source failures are otherwise visible in executions and returned error arrays.
 
 ## Environment variables
 
@@ -27,7 +27,7 @@ Restart only the assistant service after changing its env_file; other containers
 ## Troubleshooting
 
 - 401: API_TOKEN must be set in the service and match the request Header Auth credential.
-- Missing live listings: seeds contain no speculative vacancies. Add reviewed blocks; inspect `/monitor` errors and source HTML. Redirects, robots restrictions, JavaScript-only pages and selector changes require source review.
+- Missing live listings: inspect /discovery/status, per-provider errors, the candidate queue, and /monitor errors. Configure Brave credentials or use the limited Wikidata directory; confirm network grants and public DNS. No seed or snippet creates a fake vacancy. Reviewed blocks remain an optional override. Robots restrictions, JavaScript-only pages and selector changes require source review.
 - Google 403: enable Sheets API, share the dedicated spreadsheet with the service account, and verify its scopes. Do not log credential files.
 - Telegram errors: verify bot/chat access securely. Do not log HTTP request URLs, which contain tokens. Failed delivery does not write a receipt.
 - n8n connection refused: its container localhost is not the host or assistant. Use an existing shared user-defined network or an address already reachable from n8n. Do not change existing containers automatically.
@@ -37,4 +37,8 @@ Restart only the assistant service after changing its env_file; other containers
 
 ## Roadmap
 
-Provider-backed public search with official-source verification; Arabic-aware extraction and human review UI; cross-source alias deduplication; sheet-to-local status import with conflict policy; expiring/retracted opportunity states; migrations; stronger per-user approval audits; provider outbox reconciliation; more source adapters and pagination. Keep these explicit rather than presenting them as delivered functionality.
+Additional official directory/search adapters; broader Arabic extraction and a human review UI; stronger ambiguous-duplicate reconciliation; sheet-to-local status import with conflict policy; expiring/retracted opportunity states; migrations; stronger per-user approval audits; provider outbox reconciliation; more source adapters and pagination. Keep these explicit rather than presenting them as delivered functionality.
+
+## Discovery development
+
+Read docs/DISCOVERY.md before changing search or extraction. tests/test_discovery.py uses httpx.MockTransport, explicit fixture HTML and SQLite temporary databases to cover provider contracts, query coverage, incremental pagination/TTLs, missing-key fallback, evidence extraction, shared ATS mismatches, ownership uncertainty, deduplication/new cohorts, backoff, robots/redirect/response-size limits, and notification stability. Tests never contact providers or send real messages/applications. DISCOVERY_CONFIG, BRAVE_SEARCH_API_KEY and COMPANY_ALERTS_PER_RUN are documented in .env.example. Investigate live provider/network errors separately from passing offline tests.

@@ -5,11 +5,13 @@ import os
 import socket
 import time
 from datetime import datetime
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from urllib import robotparser
 from urllib.parse import urljoin, urlsplit
 import httpx
 from bs4 import BeautifulSoup
-from .core import now
+from .core import now, demo
 
 AGENT = 'InternshipResearchBot/0.1'
 
@@ -28,58 +30,82 @@ class Fetcher:
     def request(self, url):
         self.safe(url)
         host = urlsplit(url).netloc
-        time.sleep(max(0, 2 - (time.monotonic() - self.last.get(host, 0))))
-        self.last[host] = time.monotonic()
         for attempt in range(3):
-            response = self.client.get(url)
+            time.sleep(max(0, 2 - (time.monotonic() - self.last.get(host, 0))))
+            self.last[host] = time.monotonic()
+            # Bound actual bytes read, not merely the response after downloading it.
+            with self.client.stream('GET', url) as streamed:
+                body = bytearray()
+                for chunk in streamed.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 2_000_000:
+                        raise ValueError('Source exceeds 2 MB limit')
+                response = httpx.Response(streamed.status_code, headers=streamed.headers,
+                                          content=bytes(body), request=streamed.request)
             if response.status_code not in (429, 500, 502, 503, 504):
                 break
             if attempt < 2:
                 try:
-                    delay = min(60, max(2, int(response.headers.get('Retry-After', 2 ** (attempt + 1)))))
+                    delay = max(2, int(response.headers.get('Retry-After', 2 ** (attempt + 1))))
                 except ValueError:
-                    delay = 10
+                    try:
+                        delay = max(2, (parsedate_to_datetime(response.headers['Retry-After']) - datetime.now(timezone.utc)).total_seconds())
+                    except (ValueError, TypeError, KeyError):
+                        delay = 10
+                if delay > 60:
+                    raise ValueError('Source requested cooldown')
                 time.sleep(delay)
-        response.raise_for_status()
-        if len(response.content) > 2_000_000:
-            raise ValueError('Source exceeds 2 MB limit')
+        if response.status_code not in (301, 302, 303, 307, 308, 404):
+            response.raise_for_status()
         return response
     def page(self, url):
+        for _ in range(6):
+            result = self._page_once(url)
+            if isinstance(result, BeautifulSoup):
+                return result
+            url = result
+        raise ValueError('Too many source redirects')
+
+    def _page_once(self, url):
+        self.safe(url)
         p = urlsplit(url)
         origin = f'{p.scheme}://{p.netloc}'
         if origin not in self.robots:
             r = self.request(origin + '/robots.txt')
             robot = robotparser.RobotFileParser()
-            robot.parse(r.text.splitlines())
+            if r.status_code == 404:
+                robot.allow_all = True
+            elif 300 <= r.status_code < 400:
+                raise ValueError('robots.txt redirect requires canonical source URL')
+            else:
+                robot.parse(r.text.splitlines())
             self.robots[origin] = robot
         robot = self.robots[origin]
         if not robot.can_fetch(AGENT, url):
             raise ValueError('robots.txt disallows source')
         delay = robot.crawl_delay(AGENT) or 2
+        if delay > 60:
+            raise ValueError('Source crawl delay exceeds bounded worker budget')
         time.sleep(max(0, delay - (time.monotonic() - self.last.get(p.netloc, 0))))
         r = self.request(url)
+        if 300 <= r.status_code < 400:
+            target = urljoin(url, r.headers.get('location', ''))
+            self.safe(target)
+            return target  # Each redirect destination receives its own robots/SSRF checks.
+        r.raise_for_status()
         if 'text/html' not in r.headers.get('content-type', ''):
             raise ValueError('Expected HTML')
-        return BeautifulSoup(r.text, 'html.parser')
+        page = BeautifulSoup(r.text, 'html.parser')
+        page.source_url = url
+        return page
 
 def sources():
     with open(os.getenv('SOURCE_CONFIG', 'config/sources.json')) as f:
         return json.load(f)
 
 def discover(store, fetcher=None):
-    fetcher = fetcher or Fetcher()
-    results = []
-    for source in sources():
-        company = dict(source, verification_status='Unverified', verified_at='', contact_emails=[], career_links=[])
-        try:
-            page = fetcher.page(source['url'])
-            company['career_links'] = sorted({urljoin(source['url'], a['href']) for a in page.select('a[href]') if any(w in a.get_text(' ', strip=True).lower() for w in ('career', 'intern', 'training', 'توظيف', 'تدريب')) and urlsplit(urljoin(source['url'], a['href'])).scheme == 'https'})[:30]
-            company['contact_emails'] = sorted({a['href'][7:].split('?')[0] for a in page.select('a[href^="mailto:"]')})
-            company.update(verification_status='Official page fetched; contacts are general unless reviewed', verified_at=now())
-        except Exception as e:
-            company['error'] = f'{type(e).__name__}: {str(e)[:250]}'
-        results.append(store.company(company))
-    return results
+    from .discovery import run_discovery
+    return run_discovery(store, fetcher=fetcher)
 
 def monitor(store, fetcher=None):
     fetcher = fetcher or Fetcher()
@@ -107,4 +133,8 @@ def monitor(store, fetcher=None):
                 results.append(store.upsert(item))
             except Exception as e:
                 errors.append({'source':vacancy.get('source_url'), 'error':str(e)[:250]})
-    return {'opportunities':results, 'errors':errors}
+    output = {'opportunities':results, 'errors':errors}
+    if not demo():
+        from .discovery import refresh_discovered
+        output['discovery'] = refresh_discovered(store, fetcher=fetcher)
+    return output

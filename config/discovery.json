@@ -1,0 +1,66 @@
+{
+  "providers": [
+    "wikidata",
+    "brave"
+  ],
+  "locations": [
+    "Jeddah",
+    "Riyadh",
+    "Thuwal"
+  ],
+  "sectors": [
+    "startup",
+    "SME",
+    "corporation",
+    "government",
+    "bank",
+    "hospital",
+    "research center",
+    "university",
+    "retail",
+    "logistics",
+    "energy",
+    "telecommunications"
+  ],
+  "fields": [
+    "AI",
+    "Data Science",
+    "Machine Learning",
+    "Software",
+    "IT",
+    "Cybersecurity"
+  ],
+  "internship_terms": [
+    "summer internship",
+    "COOP",
+    "research internship",
+    "internship",
+    "تدريب صيفي",
+    "تدريب تعاوني"
+  ],
+  "priority_targets": [
+    "KAUST Thuwal",
+    "KACST Riyadh",
+    "Wadi Jeddah"
+  ],
+  "extra_queries": [],
+  "search_requests_per_run": 6,
+  "results_per_page": 10,
+  "max_pages_per_query": 3,
+  "search_refresh_hours": 24,
+  "provider_interval_seconds": 2,
+  "pages_per_run": 12,
+  "links_per_page": 12,
+  "max_depth": 3,
+  "max_candidates": 10000,
+  "page_refresh_hours": 24,
+  "error_retry_hours": 6,
+  "max_errors_per_run": 20,
+  "schedules": {
+    "timezone": "Asia/Riyadh",
+    "discovery_cron": "0 */4 * * *",
+    "monitor_cron": "0 7 * * *",
+    "notifications_cron": "0 8 * * *"
+  },
+  "run_budget_seconds": 120
+}

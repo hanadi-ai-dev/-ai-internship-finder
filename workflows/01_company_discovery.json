@@ -14,8 +14,8 @@
         "rule": {
           "interval": [
             {
-              "field": "days",
-              "triggerAtHour": 6
+              "field": "cronExpression",
+              "expression": "0 */4 * * *"
             }
           ]
         }
@@ -47,7 +47,29 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
-          "timeout": 180000
+          "timeout": 900000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "1",
+      "name": "Sync discovery to Sheets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://assistant:8000/sync",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 900000
         }
       },
       "retryOnFail": true,
@@ -72,6 +94,17 @@
         [
           {
             "node": "Discover companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discover companies": {
+      "main": [
+        [
+          {
+            "node": "Sync discovery to Sheets",
             "type": "main",
             "index": 0
           }

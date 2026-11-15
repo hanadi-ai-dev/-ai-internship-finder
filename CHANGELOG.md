@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 — 2026-11-15
+
+- Extended the existing service with official Brave Search and credential-free Wikidata directory adapters; configurable sector/location/technical internship queries and priority targets.
+- Added durable candidate/query/run state, bounded pagination and crawling, incremental refresh, retries, backoff and sanitized provider reports.
+- Added automatic official/career/contact link discovery, structured JobPosting extraction and explicitly uncertain HTML announcements. Preserved COOP and company outreach targets without vacancies.
+- Added public-contact evidence, website ownership labels, actual location vs query hints, and unknown-by-default summer eligibility.
+- Added cross-source opportunity aliases, company URL deduplication, provenance and new-cohort separation while preserving existing tracking IDs/statuses.
+- Integrated discovered records with AI analysis, Google Sheets candidate/company-method tabs, bounded deduplicated Telegram company alerts, and configurable repository n8n schedules.
+- Added discovery tests and provider/extension documentation. Email defaults remain disabled; no existing external containers/workflows were changed.
+- Live search/provider/site access remains separately credential/network dependent; see docs/VALIDATION.md.
+
 ## 0.1.0 — 2026-11-15
 
 - Created a modular Python/FastAPI assistant with isolated demo/live SQLite stores.

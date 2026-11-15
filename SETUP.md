@@ -51,7 +51,7 @@ docker compose -f compose.yaml -f compose.n8n-network.yaml up -d --build assista
 
 This attaches only the new service to the existing network. It does not modify n8n. If n8n has no usable existing network, run the Python service at an address it already can reach and edit workflow HTTP URLs accordingly; do not change existing containers automatically. Never use `localhost:8018` from inside n8n's container to reach another container.
 
-Import the four JSON files in `workflows/` through n8n's import UI. They are inactive. For each HTTP node select a new **Header Auth** credential: name `Authorization`, value `Bearer <your API_TOKEN>`. The default base URL is `http://assistant:8000`; edit each node if using another reachable address. No paid n8n Variables feature is required. Test with Manual Trigger first, then activate the three scheduled workflows. Schedule timezone: Asia/Riyadh (discovery 06:00, monitor/sync 07:00, notifications 08:00). Workflow 04 is manual review only; it cannot send email. Import/activation was not tested against an actual n8n instance during development.
+Import the four JSON files in `workflows/` through n8n's import UI. They are inactive. For each HTTP node select a new **Header Auth** credential: name `Authorization`, value `Bearer <your API_TOKEN>`. The default base URL is `http://assistant:8000`; edit each node if using another reachable address. No paid n8n Variables feature is required. Test with Manual Trigger first, then activate the three scheduled workflows. Schedule timezone: Asia/Riyadh (discovery every four hours, monitor/sync 07:00, notifications 08:00). Configure schedules in `config/discovery.json` and regenerate repository JSON using `python docs/generate_workflows.py`; reimport only after review. Workflow 04 is manual review only; it cannot send email. Import/activation was not tested against an actual n8n instance during development.
 
 HTTP nodes retry transient failures up to three times. Inspect n8n executions for failures. Monitor responses also contain per-source errors; a successful HTTP response does not mean every source was collected. Rerun failed sources after fixing configuration. Never add retries to the email-send action.
 
@@ -59,7 +59,7 @@ HTTP nodes retry transient failures up to three times. Inspect n8n executions fo
 
 Set `DEMO_MODE=false` in the process environment or Compose `.env` and restart only this project's service. Review source URLs, website terms, permission to automate, and rate limits before adding them. The crawler checks robots.txt and stops conservatively on inaccessible robots, redirects, unsupported content, or disallowed paths. Use the canonical HTTPS URL if a site redirects. It has a 2-second minimum per-host delay, respects crawl-delay, and retries transient responses. CAPTCHA, login, or JavaScript-only sites require manual review; no bypass is provided.
 
-`config/sources.json` stores research targets; initial domains require verification. Add banks, hospitals, government, startups, SMEs, and technical departments as appropriate. Running `/discover` fetches each configured official landing page and finds career links and explicitly published mailto contacts. These contacts are **general**, never assumed recruitment addresses. Organizations without vacancies remain outreach targets.
+`config/sources.json` retains reviewed priority/manual targets and selector overrides. Broad discovery now searches the official Brave API and credential-free Wikidata directory using `config/discovery.json`, then incrementally verifies website/career/contact pages and structured JobPosting listings. Search-only ownership, technical departments, availability and eligibility remain uncertain unless evidence supports them. Organizations without vacancies remain outreach targets. Read [docs/DISCOVERY.md](docs/DISCOVERY.md) for provider setup, secure key configuration, source verification, limits, and error/status interpretation.
 
 For monitoring, add reviewed opportunity blocks to a source:
 
@@ -87,13 +87,13 @@ For monitoring, add reviewed opportunity blocks to a source:
 
 Replace example values with reviewed real sources; do not add this fictional example as a live listing. The title must appear in the selected block; application URLs must be present in its links. Email, evidence, and ISO dates must occur verbatim. Leave dates blank if ambiguous or formatted differently, until reviewed; the system never infers a deadline. Non-Unknown eligibility requires a quoted evidence excerpt and a human-reviewed classification. Summer compatibility depends on duration, dates, student status, and university requirements, never the COOP label alone. Eligibility and email labels are reviewed configuration, not independently certified by software.
 
-Identity uses company + title + canonical source URL. Tracking survives repeated imports; different URLs for the same vacancy require manual canonicalization in config. No fuzzy cross-site deduplication is claimed. Expired/removed pages are reported as errors, not silently deleted.
+Existing IDs are preserved. New cross-source aliases match employer/title/location and normalized source/application URLs or employer-scoped structured job identifiers; distinct explicit posting years stay separate. Tracking survives repeated imports. Ambiguous duplicates remain visible for manual review; no fuzzy-match guarantee is claimed. Expired/removed pages are reported as errors, not silently deleted.
 
 ## 5. Google Sheets
 
 Create a dedicated spreadsheet and a Google Cloud service account with Sheets API enabled. Share the spreadsheet with that account as editor. Store its JSON under ignored `secrets/`. Set `GOOGLE_APPLICATION_CREDENTIALS` to its local/mounted path and `GOOGLE_SHEET_ID` to the spreadsheet ID. Alternatively use supported Google Application Default Credentials. Run `/sync` in live mode.
 
-The service creates and rewrites only `Companies`, `Opportunities`, `ApplicationMethods`, `Tracking`, and `Applications` tabs. **These tabs are dedicated mirrors: their contents are replaced.** Do not store other work in them. SQLite is authoritative; sheet edits are not imported. RAW writes prevent spreadsheet formula injection. Back up SQLite before migrations. Share the spreadsheet only with intended users; drafts and statuses are personal data.
+The service creates and rewrites only `Companies`, `Opportunities`, `ApplicationMethods`, `Tracking`, `Applications`, `CompanyMethods`, and `DiscoveryCandidates` tabs. **These tabs are dedicated mirrors: their contents are replaced.** Do not store other work in them. SQLite is authoritative; sheet edits are not imported. RAW writes prevent spreadsheet formula injection. Back up SQLite before migrations. Share the spreadsheet only with intended users; drafts and statuses are personal data.
 
 ## 6. Telegram
 
@@ -122,3 +122,9 @@ docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt -t inte
 ```
 
 The optional `proxy_ca` secret is available only during dependency installation and is not copied into image layers. Normal builds need no secret. Keep TLS verification enabled; never use `--trusted-host` to bypass it. Live runtime requests may also need a read-only mounted trusted CA bundle and `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE` pointing to it, depending on the host's network. Do not bake session-specific proxy addresses or credentials into the image.
+
+## 9. Broad discovery upgrade
+
+Back up live SQLite before upgrading. New tables/indexes are additive; existing tracked IDs and applications are retained. Set `DISCOVERY_CONFIG=config/discovery.json`; optionally add `BRAVE_SEARCH_API_KEY` securely. Wikidata needs no key, but is a sparse directory rather than a full vacancy search fallback. Allow `query.wikidata.org`, `api.search.brave.com`, and the official/ATS domains actually needed. The current managed environment denied the Wikidata CONNECT request; live broad discovery is not claimed verified here. Missing provider access yields a partial report rather than synthetic results. See [docs/DISCOVERY.md](docs/DISCOVERY.md) for complete commands and settings.
+
+Configured source entries are research targets by default, not certified official sites. After independently checking a website, mark its source entry `"reviewed": true` to enable official-source contact classification in automated discovery. Existing reviewed-selector monitoring remains supported.

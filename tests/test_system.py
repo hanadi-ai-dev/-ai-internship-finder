@@ -171,7 +171,9 @@ def test_robots_disallows_without_fetching_page(monkeypatch):
     calls = []
     class Reply:
         text = 'User-agent: *\nDisallow: /private'
+        status_code = 200
     f = Fetcher()
+    monkeypatch.setattr(f,'safe',lambda _:None)
     monkeypatch.setattr(f,'request',lambda url: (calls.append(url) or Reply()))
     with pytest.raises(ValueError,match='robots'):
         f.page('https://example.org/private/job')

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -27,7 +28,7 @@ def recommendation(item):
 def application_instructions(item):
     lines = []
     if item.get('apply_url'):
-        lines.append('Apply manually through official portal/form: ' + item['apply_url'])
+        lines.append('Apply manually through source-listed portal/form; review source verification: ' + item['apply_url'])
     if item.get('email'):
         if item.get('email_kind') == 'recruitment':
             lines.append('Verified published recruitment email (manual application): ' + item['email'])
@@ -40,15 +41,17 @@ def application_instructions(item):
 
 def message(item):
     return '\n'.join([
-        '[DEMO — not a real vacancy]' if item.get('demo') else '[Source-verified listing; review requirements]',
+        '[DEMO — not a real vacancy]' if item.get('demo') else '[' + item.get('verification_status','Source-verified listing; review requirements') + ']',
         f"{item['company']} — {item['title']}",
         f"City: {item.get('city', 'Unknown')} | Type: {item.get('kind', 'Unspecified')}",
         f"Summer eligibility: {item.get('eligibility', 'Unknown')}",
+        'Availability: ' + item.get('advertised_status', 'Review current source'),
         f"Opens: {item.get('opens') or 'Unknown'} | Closes: {item.get('closes') or 'Unknown'}",
         f"Status: {item.get('status', 'Not Applied')}",
         application_instructions(item),
         'Source: ' + item['source_url'],
-        'Checked: ' + item.get('verified_at', 'Unknown'),
+        'Latest checked source: ' + item.get('last_verified_source_url',item['source_url']),
+        'Latest source check: ' + item.get('verified_at', 'Unknown'),
     ])
 
 
@@ -92,15 +95,39 @@ def notify(store, mode='new'):
     if mode == 'daily' and not items and not store.seen('empty:' + date.isoformat()):
         outputs.append(telegram('Daily internship summary: no verified opportunities tracked. Manual source review required.'))
         store.mark('empty:' + date.isoformat())
+    if mode == 'new':
+        # Bound broad-discovery alerts; unsent companies remain eligible for the next run.
+        limit = max(0, min(100, int(os.getenv('COMPANY_ALERTS_PER_RUN','10'))))
+        sent = 0
+        for company in store.all('companies'):
+            content = {k:company.get(k,'') for k in ('id','name','url','city','career_links','contact_emails','authority')}
+            for field in ('career_links', 'contact_emails'):
+                content[field] = sorted(company.get(field, []))
+            fingerprint = hashlib.sha256(json.dumps(content,sort_keys=True).encode()).hexdigest()
+            key = 'company:' + company['id'] + ':' + fingerprint
+            if store.seen(key) or sent >= limit:
+                continue
+            text = '\n'.join(['Company outreach target — internship availability unknown',
+                company['name'], 'Location: ' + company.get('city','Unknown') + ' (query hint: ' + company.get('location_hint','Unknown') + ')',
+                'Verification: ' + company.get('verification_status','Unverified'),
+                'How to apply: no vacancy is implied. Manually check career pages or ask published general contacts about internships.',
+                'Website: ' + company['url'], 'Career pages: ' + ', '.join(company.get('career_links',[])[:4]),
+                'Published contacts (review contact type in database): ' + ', '.join(company.get('contact_emails',[])[:4]),
+                'Last source check: ' + company.get('verified_at','Not verified')])
+            outputs.append(telegram(text))
+            store.mark(key)
+            sent += 1
     return outputs
 
 
 HEADERS = {
-    'Companies':['id','name','city','sector','priority','url','verification_status','verified_at','career_links','contact_emails','error'],
-    'Opportunities':['id','company','title','city','kind','eligibility','evidence','opens','closes','requirements','source_url','verified_at','demo'],
+    'Companies':['id','name','city','location_hint','sector','priority','url','authority','verification_status','verified_at','career_links','contact_emails','contacts','provenance','technical_department','error'],
+    'Opportunities':['id','company','title','city','location_hint','location_match','kind','eligibility','evidence','opens','closes','requirements','source_url','source_urls','source_verifications','verified_at','verification_status','advertised_status','recommendation','demo'],
     'ApplicationMethods':['id','company','title','apply_url','email','email_kind','instructions'],
     'Tracking':['id','company','title','status','follow_up'],
     'Applications':['id','opportunity_id','state','created_at','sent_at','recipient','subject','error'],
+    'CompanyMethods':['id','name','url','career_links','contacts','instructions'],
+    'DiscoveryCandidates':['id','url','title','authority','state','first_seen','last_seen','verified_at','fetched_at','last_attempt','provenance','error'],
 }
 
 def sheet_sync(store):
@@ -123,8 +150,11 @@ def sheet_sync(store):
         r.raise_for_status()
     # SQLite is authoritative. Never read untrusted sheet edits as approval to send.
     opportunities = store.all()
+    from .discovery_store import DiscoveryStore
     groups = {'Companies':store.all('companies'), 'Opportunities':opportunities, 'Tracking':opportunities,
-              'ApplicationMethods':[dict(i, instructions=application_instructions(i)) for i in opportunities], 'Applications':store.all('applications')}
+              'ApplicationMethods':[dict(i, instructions=application_instructions(i)) for i in opportunities], 'Applications':store.all('applications'),
+              'CompanyMethods':[dict(c, instructions='Manual outreach/research only; no advertised vacancy implied. Check career_links and contact evidence.') for c in store.all('companies')],
+              'DiscoveryCandidates':DiscoveryStore(store).candidates(100000)}
     data = []
     for name, headers in HEADERS.items():
         rows = [headers]

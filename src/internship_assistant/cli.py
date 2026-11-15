@@ -13,13 +13,16 @@ def load_demo(store):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['demo','discover','monitor','notify','sync'])
+    parser.add_argument('command', choices=['demo','discover','monitor','notify','sync','discovery-status','discovery-candidates'])
     args = parser.parse_args()
     store = Store()
     try:
         if args.command in ('discover','monitor') and demo():
             raise ValueError('Live source commands require DEMO_MODE=false; use demo instead')
-        actions = {'demo':load_demo, 'discover':discover, 'monitor':monitor, 'notify':notify, 'sync':sheet_sync}
+        from .discovery_store import DiscoveryStore
+        actions = {'demo':load_demo, 'discover':discover, 'monitor':monitor, 'notify':notify, 'sync':sheet_sync,
+                   'discovery-status':lambda s: DiscoveryStore(s).status(),
+                   'discovery-candidates':lambda s: DiscoveryStore(s).candidates()}
         print(json.dumps(actions[args.command](store), indent=2, ensure_ascii=False))
     finally:
         store.db.close()
