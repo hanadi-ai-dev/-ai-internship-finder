@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — 2026-11-15
+
+- Added scoped bilingual HTML card/table/announcement extraction alongside JobPosting; exact evidence and explicit dates/methods retained.
+- Added verified-announcement, potential-lead, general-program and closed classification; stricter ordinary-job/program-manager rejection and employer identity checks.
+- Added permitted LinkedIn URL capture/import and manual-review tracking with no LinkedIn network requests or fabricated verification times.
+- Added typed network failures, safe transient retries and read-only diagnostics for priority targets; failures remain queued for backoff/retry.
+- Added cross-sector employer relevance priorities and nearby-location configuration while retaining diplomatic/uncertain employers.
+- Added anonymous SmartRecruiters Posting API reads from actual published career URLs; no application submission endpoints used.
+- Added assistant-only Windows update helper preserving Compose identity, overrides, SQLite backups and data volume. No existing infrastructure was modified.
+- Expanded automated tests and documentation; live priority/SmartRecruiters content remains unverified due to proxy/DNS restrictions. Free source parsing succeeded but yielded no local vacancy.
+
 ## 0.3.0 — 2026-11-15
 
 - Made credential-free public_sources/Wikidata/Wikimedia/Overpass discovery the default; Brave now requires explicit enablement, configuration and credentials.

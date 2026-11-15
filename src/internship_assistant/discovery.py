@@ -58,6 +58,8 @@ def load_config():
 
 def ingest_public_hit(state,hit,config,company=None,trusted=False):
     """Retain published leads without relabeling them as verified official vacancies."""
+    from .social import is_linkedin,ingest_linkedin
+    if is_linkedin(hit['url']):return ingest_linkedin(state,hit,config)
     if hit.get('kind') == 'company_lead':
         previous=next((c for c in state.store.all('companies') if url_key(c['url'])==url_key(hit['url'])),{})
         lead={'name':hit['company_name'],'url':hit['url'],'city':'Unknown','sector':hit.get('sector','Unknown'),
@@ -79,7 +81,7 @@ def ingest_public_hit(state,hit,config,company=None,trusted=False):
             'title':hit['title'],'source_url':hit['source_url'],'city':hit.get('city','Unknown'),
             'location_hint':hit.get('location_hint','Unknown'),'kind':kind_for_free(hit),
             'eligibility':'Unknown','evidence':'','closes':'','opens':'','posted_at':hit.get('posted_at',''),
-            'external_id':hit.get('entry_id',''),'apply_url':hit.get('apply_url') or hit['url'],
+            'external_id':hit.get('entry_id',''),'apply_url':hit.get('apply_url',hit['url']),
             'requirements':hit.get('requirements',''),'discovery_method':'free_public_source',
             'source_trusted':trusted,
             'verification_status':'Official-linked public recruitment source fetched' if trusted else 'Unverified public-source lead; official confirmation required',
@@ -87,6 +89,8 @@ def ingest_public_hit(state,hit,config,company=None,trusted=False):
             'attribution_url':hit.get('attribution_url',hit['source_url'])}
         if company:
             item.update(company=company['name'],company_id=company['id'],company_url=company['url'])
+        from .evidence import classify_record
+        item=classify_record(item,trusted)
         from .integrations import recommendation
         try:
             item['recommendation']=recommendation(item)
@@ -151,7 +155,10 @@ def run_search(state, config, providers, deadline=float('inf')):
             hits, more = providers[name].search(task,progress.get('page',0),config['results_per_page'])
             for hit in hits:
                 try:
-                    if (ingest_public_hit(state,hit,config) if hit.get('kind') in ('company_lead','opportunity_lead') else state.enqueue(hit,config)):
+                    from .social import is_linkedin,ingest_linkedin
+                    if is_linkedin(hit['url']):accepted=ingest_linkedin(state,hit,config)
+                    else:accepted=ingest_public_hit(state,hit,config) if hit.get('kind') in ('company_lead','opportunity_lead') else state.enqueue(hit,config)
+                    if accepted:
                         added += 1
                 except (ValueError,TypeError):
                     # Unsupported/non-public URLs never become fetch targets.
@@ -173,6 +180,12 @@ def run_search(state, config, providers, deadline=float('inf')):
 
 def _company_by_id(store, id):
     return next((c for c in store.all('companies') if c['id'] == id),None)
+
+
+def company_referral(candidate,store):
+    company=_company_by_id(store,candidate.get('company_id'))
+    return bool(company and company.get('authority') in ('reviewed','wikidata_website_claim') and
+                any(p.get('provider')=='official-link' for p in candidate.get('provenance',[])))
 
 
 def identify_company(store, candidate, page, config):
@@ -222,6 +235,11 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
             break
         url = candidate['url']
         try:
+            from .social import is_linkedin,ingest_linkedin
+            if is_linkedin(url):
+                ingest_linkedin(state,candidate,config)
+                counts['needs_review']+=1
+                continue
             if candidate.get('resource'):
                 company=_company_by_id(state.store,candidate.get('company_id'))
                 if not company:
@@ -237,6 +255,7 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
                 state.finish(candidate,config,'verified' if trusted else 'needs_review')
                 continue
             page = fetcher.page(url)
+            page.official_referral=(company_referral(candidate,state.store))
             counts['pages_fetched'] += 1
             url = getattr(page, 'source_url', None) or url
             candidate['resolved_url'] = url
@@ -254,6 +273,7 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
                 continue
             trusted = company.get('authority') in ('reviewed','wikidata_website_claim')
             same_site = host_key(url) == host_key(company['url'])
+            trusted=bool(trusted and (same_site or company_referral(candidate,state.store)))
             employer_matches = [matching_employer(n,company) for n in structured(page) if 'JobPosting' in types(n)]
             if not same_site and employer_matches and True not in employer_matches:
                 state.finish(candidate,config,'needs_review')
@@ -261,8 +281,8 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
                 continue
             links = page_links(page,url,config['links_per_page'])
             contacts = public_contacts(page,url,trusted and (same_site or True in employer_matches))
-            company = state.store.company(dict(company, last_attempt=now(), verified_at=now(), error='',
-                verification_status='Official-source content fetched; website identity: ' + company['authority'] if trusted else 'Page fetched; website ownership unconfirmed',
+            company = state.store.company(dict(company, last_attempt=now(), verified_at=now() if same_site or trusted else company.get('verified_at',''), error='',
+                verification_status=('Official-source content fetched; website identity: ' + company['authority'] if trusted else 'Page fetched; website ownership unconfirmed') if same_site or trusted else company.get('verification_status','External lead; employer relationship unverified'),
                 career_links=[l['url'] for l in links if l['career']],
                 contact_emails=[c['email'] for c in contacts], contacts=contacts,
                 provenance=candidate['provenance']))
@@ -277,8 +297,11 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
                     resource=ats_resource(link['url'])
                     if resource:
                         resource['official_referral']=trusted
-                    state.enqueue(dict(link,provider='official-link' if trusted else 'self-identified-link',
-                        source_url=url,authority='unverified',**({'resource':resource} if resource else {})),config,company,candidate.get('depth',0)+1)
+                    hit=dict(link,provider='official-link' if trusted else 'self-identified-link',
+                        source_url=url,authority='unverified',**({'resource':resource} if resource else {}))
+                    if is_linkedin(link['url']):
+                        hit['company_name']=company['name'];ingest_linkedin(state,hit,config)
+                    else:state.enqueue(hit,config,company,candidate.get('depth',0)+1)
                 for feed in page.select('link[rel="alternate"][href]'):
                     if feed.get('type') in ('application/rss+xml','application/atom+xml'):
                         from .extraction import https_link
@@ -287,6 +310,9 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
                             state.enqueue({'url':target,'title':'Published employer feed','provider':'official-feed-link',
                                 'source_url':url,'resource':{'kind':'feed','url':target,'official_referral':trusted}},config,company,candidate.get('depth',0)+1)
             opportunities = extract_opportunities(page,url,company,trusted,config['locations'])
+            from .evidence import page_outcome
+            candidate['content_outcome']=page_outcome(page,opportunities)
+            candidate['record_class']=candidate['content_outcome']
             for item in opportunities:
                 try:
                     from .integrations import recommendation
@@ -300,18 +326,19 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
             state.finish(candidate,config,'verified' if trusted else 'needs_review')
             counts['pages_verified'] += int(trusted)
         except Exception as e:
+            if getattr(e,'lead_url',None):
+                from .social import ingest_linkedin
+                ingest_linkedin(state,{'url':e.lead_url,'provider':'public-redirect','source_url':url},config)
+                candidate['content_outcome']='linkedin_redirect_lead'
+                state.finish(candidate,config,'needs_review',fetched=False)
+                counts['needs_review']+=1
+                continue
             # Do not store exception URLs/headers. URL is already a validated public candidate.
-            error = f'{type(e).__name__}: source fetch/extraction failed; review robots, URL and content'
-            if isinstance(e,httpx.HTTPStatusError):
-                error = f'HTTP {e.response.status_code}: source unavailable or access denied'
-            elif isinstance(e,socket.gaierror):
-                error = 'Public source DNS resolution failed'
-            elif isinstance(e,httpx.ProxyError):
-                error = 'Proxy transport unavailable; check outbound policy and proxy readiness'
-            if isinstance(e,ValueError) and str(e) in ('robots.txt disallows source','Private network destination refused','Expected HTML','Source exceeds 2 MB limit'):
-                error = str(e)
+            from .network import failure_detail
+            detail=failure_detail(e);error=detail['message']
+            candidate['error_detail']=detail
             state.finish(candidate,config,'error',error)
-            errors.append({'source_url':url,'error':error})
+            errors.append({'source_url':url,'error':error,'detail':detail})
             if len(errors) >= config['max_errors_per_run']:
                 break
     return counts,errors

@@ -2,7 +2,9 @@
 
 An evidence-first assistant for a Saudi AI student seeking summer, COOP, research, and technical internships in Jeddah, Riyadh, and Thuwal. Python handles public-source collection, SQLite tracking, Google Sheets export, Telegram notifications, and guarded email applications. Existing n8n Community Edition orchestrates the jobs; this project never replaces it.
 
-**Free by default (0.3):** Wikidata, anonymous Arabic/English Wikimedia search, bounded OpenStreetMap organization inventories, public directory/community data, employer career pages, published RSS/Atom, and documented Greenhouse/Lever read APIs. No billing account, paid search key or hosted AI is required. Brave and remote AI are disabled unless explicitly opted into. Local bilingual relevance and existing tracking/Sheets/Telegram/n8n remain available.
+**Free by default (0.4):** Wikidata, anonymous Arabic/English Wikimedia search, bounded OpenStreetMap organization inventories, public directory/community data, employer career pages, published RSS/Atom, and documented Greenhouse/Lever read APIs. No billing account, paid search key or hosted AI is required. Brave and remote AI are disabled unless explicitly opted into. Local bilingual relevance and existing tracking/Sheets/Telegram/n8n remain available.
+
+Extraction now handles scoped Arabic/English cards, tables and announcements, with explicit verified/lead/program/closed classification. LinkedIn discovery retains permitted public URLs for manual review without requesting LinkedIn. See [extraction, LinkedIn and current priority-site diagnostics](docs/EXTRACTION_AND_LINKEDIN.md) and [Windows update commands](docs/WINDOWS_UPDATE.md).
 
 Read the [zero-cost strategy and actual live-check results](docs/FREE_DISCOVERY.md). Live GitHub source parsing succeeded (876 company profiles and 1,450 internship rows), but strict local filters found zero matches; no local vacancies were verified. Other public endpoints were blocked by this environment's network policy. Sources never fall back to invented results.
 

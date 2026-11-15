@@ -8,7 +8,7 @@ from .sources import discover, monitor
 from .integrations import notify, sheet_sync, recommendation
 from . import applications
 
-app = FastAPI(title='AI Internship Assistant', version='0.3.0')
+app = FastAPI(title='AI Internship Assistant', version='0.4.0')
 lock = Lock()
 
 def auth(authorization: str = Header(default='')):
@@ -38,7 +38,7 @@ def opportunities():
 
 @app.get('/companies', dependencies=[Depends(auth)])
 def companies():
-    return run(lambda s:s.all('companies'))
+    return run(lambda s:sorted(s.all('companies'),key=lambda c:-c.get('priority_score',30)))
 
 @app.get('/discovery/status', dependencies=[Depends(auth)])
 def discovery_status():
@@ -49,6 +49,20 @@ def discovery_status():
 def discovery_candidates(limit: int = Query(default=100, ge=1, le=1000)):
     from .discovery_store import DiscoveryStore
     return run(lambda s: DiscoveryStore(s).candidates(limit))
+
+class LeadImport(BaseModel):
+    leads: list[dict] = Field(max_length=100)
+
+@app.post('/discovery/leads', dependencies=[Depends(auth)])
+def lead_import(body:LeadImport):
+    from .social import import_linkedin_leads
+    return run(lambda s:import_linkedin_leads(s,body.leads))
+
+@app.post('/discovery/diagnose', dependencies=[Depends(auth)])
+def priority_diagnostics():
+    if demo():return {'demo':True,'status':'disabled','targets':[]}
+    from .network import diagnose_targets
+    return diagnose_targets()
 
 @app.post('/discover', dependencies=[Depends(auth)])
 def discovery():

@@ -11,11 +11,12 @@ from bs4 import BeautifulSoup
 from .discovery_store import clean_url, host_key
 from .extraction import INTERNSHIP, plain, kind_for, date_value
 from .search import ProviderError
+from .evidence import internship_role
 
 
 def location_match(text, config):
     aliases = config.get('location_aliases',{})
-    terms = [term for city in config['locations'] for term in [city] + aliases.get(city,[])]
+    terms = [term for city in config['locations'] for term in [city] + aliases.get(city,[])] + config.get('nearby_locations',[])
     return any(re.search(r'(?<!\w)' + re.escape(term) + r'(?!\w)',text,re.I) for term in terms)
 
 
@@ -82,7 +83,7 @@ def parse_internship_table(text, config):
                 last_company=company
             title=cells[1].get_text(' ',strip=True)
             location=cells[2].get_text(' ',strip=True)
-            if not company or not title or not in_scope(location,config):
+            if not company or not title or not internship_role(title) or not in_scope(location,config):
                 continue
             links=[_https(a.get('href')) for a in cells[3].select('a[href]')]
             url=next((u for u in links if u and host_key(u) not in ('simplify.jobs',)), '')
@@ -111,14 +112,16 @@ def parse_feed(text, config):
             if name=='link' and node.attrib.get('rel','alternate')=='alternate':
                 links.append(node.attrib.get('href') or node.text or '')
         title=plain(values.get('title',''))
-        description=plain(values.get('description') or values.get('summary') or values.get('content',''))
-        if not INTERNSHIP.search(title+' '+description) or not in_scope(title+' '+description,config):
+        raw_description=values.get('description') or values.get('summary') or values.get('content','')
+        description=plain(raw_description)
+        if not internship_role(title,description) or not in_scope(title+' '+description,config):
             continue
         url=next((u for value in links if (u:=_https(value))), '')
         if not url:
             continue
         # RSS authors are not assumed to be employers. Employer remains unknown unless source-configured.
         hits.append({'url':url,'title':title,'requirements':description[:12000], 'kind':'opportunity_lead',
+                     'application_urls':[_https(a.get('href')) for a in BeautifulSoup(raw_description,'html.parser').select('a[href]') if _https(a.get('href'))][:10],
                      'company_name':'','location_hint':'Target location mentioned; exact workplace unverified',
                      'entry_id':values.get('guid') or values.get('id') or url,
                      'posted_at':'','authority':'unverified','scope_evidence':(title+' '+description)[:2000]})
@@ -206,6 +209,8 @@ def ats_resource(url):
         return {'kind':'greenhouse','board':parts[0]}
     if p.hostname in ('jobs.lever.co','jobs.eu.lever.co'):
         return {'kind':'lever','board':parts[0],'region':'eu' if p.hostname=='jobs.eu.lever.co' else 'global'}
+    if p.hostname in ('jobs.smartrecruiters.com','careers.smartrecruiters.com'):
+        return {'kind':'smartrecruiters','board':parts[0]}
     return None
 
 
@@ -213,7 +218,7 @@ def resource_hits(resource,company,transport,fetcher,config):
     """Free, documented ATS read APIs or explicitly published employer feeds."""
     kind=resource['kind']
     board=resource.get('board','')
-    if kind in ('greenhouse','lever') and not re.fullmatch(r'[A-Za-z0-9_-]+',board):
+    if kind in ('greenhouse','lever','smartrecruiters') and not re.fullmatch(r'[A-Za-z0-9_-]+',board):
         raise ValueError('Invalid board slug')
     hits=[]
     if kind=='greenhouse':
@@ -222,7 +227,7 @@ def resource_hits(resource,company,transport,fetcher,config):
         if not isinstance(data.get('jobs'),list): raise ValueError('Invalid Greenhouse schema')
         for row in data['jobs']:
             title=plain(row.get('title')); description=plain(row.get('content'))
-            if not title or not INTERNSHIP.search(title+' '+description): continue
+            if not title or not internship_role(title,description): continue
             city=row.get('location',{}).get('name','')
             if not in_scope(city+' '+description,config): continue
             url=_https(row.get('absolute_url'))
@@ -240,7 +245,7 @@ def resource_hits(resource,company,transport,fetcher,config):
             for row in data:
                 title=plain(row.get('text')); description=plain(row.get('descriptionPlain') or row.get('description'))
                 city=row.get('categories',{}).get('location','')
-                if not title or not INTERNSHIP.search(title+' '+description) or not in_scope(city+' '+description,config): continue
+                if not title or not internship_role(title,description,str(row.get('categories',{}).get('commitment',''))) or not in_scope(city+' '+description,config): continue
                 url=_https(row.get('hostedUrl'))
                 if url:
                     hits.append({'url':url,'title':title,'company_name':company['name'],'requirements':description[:12000],
@@ -248,6 +253,33 @@ def resource_hits(resource,company,transport,fetcher,config):
                         'posted_at':datetime.fromtimestamp(row['createdAt']/1000,timezone.utc).date().isoformat() if isinstance(row.get('createdAt'),(int,float)) else '',
                         'apply_url':_https(row.get('applyUrl')),'source_url':endpoint,'provider':'lever','kind':'opportunity_lead'})
             if len(data)<100: break
+    elif kind=='smartrecruiters':
+        endpoint=f'https://api.smartrecruiters.com/v1/companies/{board}/postings'
+        details_read=0
+        for page in range(config['max_pages_per_query']):
+            data=transport.get('smartrecruiters',endpoint,params={'offset':page*100,'limit':100})
+            if not isinstance(data.get('content'),list):raise ValueError('Invalid SmartRecruiters public postings schema')
+            for row in data['content']:
+                title=plain(row.get('name'));city=row.get('location',{}).get('city','')
+                employment=row.get('typeOfEmployment',{}).get('label','')
+                if not title or not internship_role(title,employment=employment) or not in_scope(city,config):continue
+                url=_https(row.get('ref'))
+                if not url:continue
+                # Public posting detail can supply the actual employer-provided apply URL.
+                if urlsplit(url).hostname!='api.smartrecruiters.com' or not urlsplit(url).path.casefold().startswith(f'/v1/companies/{board}/postings/'.casefold()):continue
+                if details_read>=config['links_per_page']:break
+                detail=transport.get('smartrecruiters',url);details_read+=1
+                employer=detail.get('company',{})
+                # Do not trust a conflicting employer identity from a shared ATS response.
+                if employer.get('name') and employer['name'].casefold() not in {company['name'].casefold(),*(n.casefold() for n in company.get('name_aliases',[]))}:continue
+                sections=detail.get('jobAd',{}).get('sections',{})
+                description=' '.join(plain(section.get('text')) for section in sections.values() if isinstance(section,dict))
+                apply=_https(detail.get('applyUrl'))
+                hits.append({'url':apply or url,'title':title,'company_name':company['name'],'requirements':description[:12000],
+                    'city':city or 'Unknown','location_hint':city,'entry_id':str(row.get('id','')),
+                    'posted_at':date_value(row.get('releasedDate')),'apply_url':apply,'source_url':url,
+                    'provider':'smartrecruiters','kind':'opportunity_lead'})
+            if len(data['content'])<100:break
     elif kind=='feed':
         endpoint=resource['url']; hits,_=parse_feed(fetcher.document(endpoint),config)
         for hit in hits: hit.update(company_name=company['name'],source_url=endpoint,provider='official-feed')

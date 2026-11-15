@@ -134,5 +134,12 @@
       22.4,
       39.3
     ]
-  }
+  },
+  "nearby_locations": [
+    "Makkah",
+    "Mecca",
+    "مكة",
+    "Rabigh",
+    "رابغ"
+  ]
 }

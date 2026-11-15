@@ -23,6 +23,11 @@ def opportunity_aliases(item):
         aliases.append(scope + '|url:' + url_key(item['apply_url']))
     if item.get('canonical_job_url'):
         aliases.append(scope + '|url:' + url_key(item['canonical_job_url']))
+    if item.get('company_url'):
+        # Exact observed URLs + exact employer/title/location bridge legacy/name-only
+        # leads to official records, without fuzzy employer matching or bare numeric IDs.
+        legacy_scope='|'.join([normalized(item['company']),normalized(item['title']),normalized(item.get('city',''))])
+        aliases.extend(legacy_scope+'|url:'+url_key(item[field]) for field in ('source_url','apply_url','canonical_job_url') if item.get(field))
     identifier = item.get('external_id')
     if identifier:
         aliases.append(company + '|external:' + str(identifier))
@@ -84,12 +89,12 @@ class Store:
         CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY);
         ''')
         # Additive index backfill: existing IDs, statuses, applications and receipts stay intact.
-        if not self.db.execute('SELECT 1 FROM schema_migrations WHERE name=?', ('discovery_aliases_v2',)).fetchone():
+        if not self.db.execute('SELECT 1 FROM schema_migrations WHERE name=?', ('discovery_aliases_v4',)).fetchone():
             with self.db:
                 for item in self.all():
                     for alias in opportunity_aliases(item):
                         self.db.execute('INSERT OR IGNORE INTO opportunity_aliases VALUES(?,?)', (alias, item['id']))
-                self.db.execute('INSERT INTO schema_migrations VALUES(?)', ('discovery_aliases_v2',))
+                self.db.execute('INSERT INTO schema_migrations VALUES(?)', ('discovery_aliases_v4',))
     def upsert(self, raw):
         item = validate(raw)
         checked_url = item['source_url']
@@ -122,8 +127,8 @@ class Store:
                         break
         source_urls = set(item.get('source_urls', [])) | {item['source_url']}
         if previous:
-            if (item.get('discovery_method') == 'free_public_source' and not item.get('source_trusted') and
-                (previous.get('discovery_method') != 'free_public_source' or previous.get('source_trusted'))):
+            if (item.get('discovery_method') in ('free_public_source','linkedin_lead') and not item.get('source_trusted') and
+                (previous.get('discovery_method') not in ('free_public_source','linkedin_lead') or previous.get('source_trusted'))):
                 # A community/feed refresh may add provenance, never downgrade stronger evidence.
                 item = dict(previous)
             source_urls.update(previous.get('source_urls', [previous['source_url']]))
@@ -140,14 +145,16 @@ class Store:
         checks = {c['url']:c for c in (previous or {}).get('source_verifications', [])}
         if previous and previous.get('verified_at'):
             checks.setdefault(previous['source_url'], {'url':previous['source_url'], 'verified_at':previous['verified_at']})
-        checks[checked_url] = {'url':checked_url, 'verified_at':now()}
+        observed_only=raw.get('source_observed_only',False)
+        checks[checked_url] = ({'url':checked_url,'observed_at':now(),'verification':'URL observed only; not fetched'} if observed_only else
+                               {'url':checked_url, 'verified_at':now()})
         item['source_verifications'] = sorted(checks.values(), key=lambda c:c['url'])
-        item['last_verified_source_url'] = checked_url
+        item['last_verified_source_url'] = (previous or {}).get('last_verified_source_url','') if observed_only else checked_url
         item['demo'] = demo()
-        content = {k:v for k,v in item.items() if k not in ('verified_at', 'fingerprint', 'source_urls', 'source_verifications', 'last_verified_source_url', 'discovered_at', 'recommendation', 'status', 'follow_up')}
+        content = {k:v for k,v in item.items() if k not in ('verified_at', 'fingerprint', 'source_urls', 'source_verifications', 'last_verified_source_url', 'discovered_at', 'observed_at', 'attribution_url', 'recommendation', 'status', 'follow_up')}
         fingerprint = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
         item['fingerprint'] = fingerprint
-        item['verified_at'] = now()
+        item['verified_at'] = (previous or {}).get('verified_at','') if observed_only else now()
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO opportunities VALUES(?,?,?)', (item['id'], json.dumps(item), fingerprint))
             for alias in aliases:
@@ -178,6 +185,8 @@ class Store:
             merged['contacts'] = list({(c['email'].lower(),c['source_url'],c['kind']):c for c in merged.get('contacts',[])}.values())
             item = merged
         item = dict(item, id=id)
+        from .quality import employer_priority
+        item.update(employer_priority(item))
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO companies VALUES(?,?)', (id, json.dumps(item)))
         return item

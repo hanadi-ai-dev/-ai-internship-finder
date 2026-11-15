@@ -45,14 +45,15 @@ def message(item):
         f"{item['company']} — {item['title']}",
         f"City: {item.get('city', 'Unknown')} | Type: {item.get('kind', 'Unspecified')}",
         f"Summer eligibility: {item.get('eligibility', 'Unknown')}",
+        'Classification: ' + item.get('record_class','Legacy record; review source'),
         'Availability: ' + item.get('advertised_status', 'Review current source'),
         f"Opens: {item.get('opens') or 'Unknown'} | Closes: {item.get('closes') or 'Unknown'}",
         f"Status: {item.get('status', 'Not Applied')}",
         application_instructions(item),
         'Source: ' + item['source_url'],
         'Attribution: ' + item.get('attribution_url', item['source_url']),
-        'Latest checked source: ' + item.get('last_verified_source_url',item['source_url']),
-        'Latest source check: ' + item.get('verified_at', 'Unknown'),
+        'Latest checked source: ' + (item.get('last_verified_source_url') or 'Not fetched/verified'),
+        'Latest source check: ' + (item.get('verified_at') or 'Unknown'),
     ])
 
 
@@ -80,6 +81,8 @@ def notify(store, mode='new'):
     outputs = []
     items = store.all()
     for item in items:
+        if item.get('record_class')=='general_program':continue
+        if mode in ('new','deadlines') and item.get('record_class')=='closed':continue
         if mode == 'deadlines':
             closing = item.get('closes')
             due = item.get('follow_up')
@@ -100,7 +103,7 @@ def notify(store, mode='new'):
         # Bound broad-discovery alerts; unsent companies remain eligible for the next run.
         limit = max(0, min(100, int(os.getenv('COMPANY_ALERTS_PER_RUN','10'))))
         sent = 0
-        for company in store.all('companies'):
+        for company in sorted(store.all('companies'),key=lambda c:-c.get('priority_score',30)):
             content = {k:company.get(k,'') for k in ('id','name','url','city','career_links','contact_emails','authority')}
             for field in ('career_links', 'contact_emails'):
                 content[field] = sorted(company.get(field, []))
@@ -122,13 +125,13 @@ def notify(store, mode='new'):
 
 
 HEADERS = {
-    'Companies':['id','name','city','location_hint','sector','priority','url','authority','verification_status','verified_at','career_links','contact_emails','contacts','provenance','technical_department','error'],
-    'Opportunities':['id','company','title','city','location_hint','location_match','kind','eligibility','evidence','opens','closes','requirements','source_url','source_urls','source_verifications','verified_at','verification_status','advertised_status','attribution_url','discovery_method','recommendation','demo'],
+    'Companies':['id','name','city','location_hint','sector','priority','priority_score','priority_reasons','url','authority','verification_status','verified_at','career_links','contact_emails','contacts','provenance','technical_department','error'],
+    'Opportunities':['id','company','title','city','location_hint','location_match','kind','eligibility','evidence','opens','closes','requirements','source_url','source_urls','source_verifications','verified_at','verification_status','advertised_status','attribution_url','discovery_method','recommendation','record_class','availability','demo'],
     'ApplicationMethods':['id','company','title','apply_url','email','email_kind','instructions'],
     'Tracking':['id','company','title','status','follow_up'],
     'Applications':['id','opportunity_id','state','created_at','sent_at','recipient','subject','error'],
     'CompanyMethods':['id','name','url','career_links','contacts','instructions'],
-    'DiscoveryCandidates':['id','url','title','authority','state','first_seen','last_seen','verified_at','fetched_at','last_attempt','provenance','error'],
+    'DiscoveryCandidates':['id','url','title','authority','state','record_class','content_outcome','priority_score','first_seen','last_seen','verified_at','fetched_at','last_attempt','provenance','error','error_detail'],
 }
 
 def sheet_sync(store):

@@ -57,7 +57,8 @@ class DiscoveryStore:
 
     def enqueue(self, hit, config, company=None, depth=0, due=True):
         url = clean_url(hit['url'])
-        id = key(url_key(url))
+        from .social import is_linkedin,linkedin_identity
+        id = key(linkedin_identity(url) if is_linkedin(url) else url_key(url))
         row = self.db.execute('SELECT payload,next_check FROM discovery_candidates WHERE id=?',(id,)).fetchone()
         if not row and self.db.execute('SELECT count(*) FROM discovery_candidates').fetchone()[0] >= config['max_candidates']:
             return None
@@ -69,14 +70,16 @@ class DiscoveryStore:
             item['provenance'].append(provenance)
         item['provenance'] = item['provenance'][-30:]
         item['last_seen'] = now()
+        if hit.get('source_url') and not item.get('discovered_from'):item['discovered_from']=hit['source_url']
         if hit.get('authority') in ('reviewed','wikidata_website_claim','configured'):
             item['authority'] = hit['authority']
             item['organization_name'] = hit.get('title','')
         item.setdefault('authority','unverified')
-        for field in ('title','location_hint','sector','entity_id','resource','kind','company_name'):
+        for field in ('title','location_hint','sector','entity_id','resource','kind','company_name','application_urls','record_class','verification_status'):
             if hit.get(field) and not item.get(field):
                 item[field] = hit[field]
         if company:
+            item['priority_score']=company.get('priority_score',30)
             # Do not let a later anonymous search hit erase the official referral chain.
             had_company = bool(item.get('company_id'))
             item['company_id'] = company['id']
@@ -95,12 +98,14 @@ class DiscoveryStore:
 
     def candidates(self, limit=100, due=False):
         if due:
-            rows = self.db.execute('SELECT payload FROM discovery_candidates WHERE next_check<=? ORDER BY next_check,id LIMIT ?',(now(),limit))
+            rows = self.db.execute('SELECT payload FROM discovery_candidates WHERE next_check<=? ORDER BY next_check,id',(now(),))
+            items=[json.loads(r[0]) for r in rows]
+            return sorted(items,key=lambda item:-item.get('priority_score',30))[:limit]
         else:
             rows = self.db.execute('SELECT payload FROM discovery_candidates ORDER BY id LIMIT ?',(limit,))
         return [json.loads(r[0]) for r in rows]
 
-    def finish(self, item, config, state='verified', error=''):
+    def finish(self, item, config, state='verified', error='', fetched=True):
         item = dict(item, state=state, last_attempt=now())
         if error:
             item['error'] = error
@@ -108,9 +113,10 @@ class DiscoveryStore:
             hours = min(168, config['error_retry_hours'] * 2 ** min(item['failures']-1,5))
         else:
             item.pop('error',None)
+            item.pop('error_detail',None)
             item['failures'] = 0
-            item['fetched_at'] = now()
-            item['verified_at'] = now() if state == 'verified' else item.get('verified_at','')
+            if fetched:item['fetched_at'] = now()
+            item['verified_at'] = now() if state == 'verified' and fetched else item.get('verified_at','')
             hours = config['page_refresh_hours']
         with self.db:
             self.db.execute('UPDATE discovery_candidates SET payload=?,next_check=? WHERE id=?',(json.dumps(item),later(hours),item['id']))
@@ -124,8 +130,13 @@ class DiscoveryStore:
     def status(self):
         row = self.db.execute('SELECT payload FROM discovery_runs ORDER BY id DESC LIMIT 1').fetchone()
         counts = {}
+        errors={};classes={}
         for item in self.db.execute('SELECT payload FROM discovery_candidates'):
-            state = json.loads(item[0])['state']
+            payload=json.loads(item[0]);state = payload['state']
             counts[state] = counts.get(state,0) + 1
-        return {'last_run':json.loads(row[0]) if row else None, 'candidate_counts':counts,
+            if payload.get('error_detail'):
+                code=payload['error_detail']['code'];errors[code]=errors.get(code,0)+1
+            if payload.get('content_outcome'):
+                code=payload['content_outcome'];classes[code]=classes.get(code,0)+1
+        return {'last_run':json.loads(row[0]) if row else None, 'candidate_counts':counts,'failure_counts':errors,'content_outcomes':classes,
                 'due':self.db.execute('SELECT count(*) FROM discovery_candidates WHERE next_check<=?',(now(),)).fetchone()[0]}

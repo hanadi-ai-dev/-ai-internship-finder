@@ -132,3 +132,11 @@ Configured source entries are research targets by default, not certified officia
 ## 10. Zero-cost defaults (0.3)
 
 Use `.env.example` with `ENABLE_BRAVE_SEARCH=false`, `AI_PROVIDER=local`, and `EMAIL_SENDING_ENABLED=false`. No subscription, credit card or billing account is needed for the default discovery/tracking workflow. Google Sheets and Telegram authentication remain optional free integrations; Sheets API use does not require billing within free quotas. Run `DEMO_MODE=false .venv/bin/internships free-source-check` to check actual public directory/community data without DB imports or messaging. See [docs/FREE_DISCOVERY.md](docs/FREE_DISCOVERY.md) for the source-by-source live validation record, anonymous API contracts, geographic filters and expansion instructions. Leave `include_remote_leads=false` for strict target-location filtering. A successful download with zero relevant matches is reported honestly.
+
+## 11. Extraction, LinkedIn and assistant-only Windows updates (0.4)
+
+Read [docs/EXTRACTION_AND_LINKEDIN.md](docs/EXTRACTION_AND_LINKEDIN.md) for record classification, scoped evidence, employer identity, new SmartRecruiters reads and LinkedIn URL-only ingestion. LinkedIn is never fetched; permitted public job/post URLs remain unverified leads. `POST /discovery/leads` is authenticated and bounded; `internships import-leads --file data/linkedin-leads.json` imports ignored local JSON. No messages or applications are sent.
+
+Read-only diagnostics: `DEMO_MODE=false .venv/bin/internships diagnose-targets`. The live priority probes found local DNS failures plus separate proxy 403 denials, not proof that KAUST/KACST/Wadi Jeddah are unavailable or have no internships. Do not replace their URLs by guessing.
+
+On Windows, run `git pull --ff-only` in the existing checkout, check it succeeded, then `powershell -NoProfile -File .\scripts\update-assistant.ps1`. If you originally used a custom project, pass its existing name with -ProjectName. The helper backs up SQLite, preserves project/override/volume identity and updates only assistant using --no-deps. PowerShell runtime validation was unavailable here. Full commands, safeguards and limitations: [docs/WINDOWS_UPDATE.md](docs/WINDOWS_UPDATE.md).

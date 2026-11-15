@@ -1,5 +1,14 @@
 # Validation records
 
+## 0.4.0 — 2026-11-15
+
+- Full automated suite passes 109 tests, including existing features and new bilingual cards/tables/announcements, expired/program classification, ordinary-job false positives, external methods, employer identity, cross-source dedup/tracking, LinkedIn no-fetch/unverified timestamps, network categories/retries and priority handling.
+- Live read-only priority diagnostics: KAUST/KACST/Wadi Jeddah each failed local public DNS resolution; independent robots/homepage HEAD paths were denied by the managed proxy with 403. No remote DNS, robots policy, page content or vacancy availability was verified. Targets were not removed or assigned guessed replacement URLs.
+- SmartRecruiters public API probe: CONNECT denied by proxy 403; adapter contract tests use controlled responses, not claimed live postings.
+- Live free-source check passed: 876 Remote In Tech profiles and 1,450 community internship rows parsed, zero local/nearby matches. No Saudi vacancy was verified from these snapshots.
+- LinkedIn was deliberately never requested. No notifications/applications were sent. No existing Docker container or deployed n8n workflow was modified.
+- Windows PowerShell helper is supplied for review/user execution; PowerShell is absent in this environment, so its syntax/runtime were not validated here. Python compilation, editable package installation and Docker Compose configuration validation passed; the full suite includes an additive upgrade test for existing v2 aliases and a no-fetch LinkedIn redirect test.
+
 ## 0.3.0 — 2026-11-15
 
 - **72 automated tests passed**, including the original suite and zero-cost defaults, source contracts, bilingual filtering, free inventory cursor expansion, attribution, safer imports, compressed/streamed data, and read-only diagnostics. No paid keys were needed.

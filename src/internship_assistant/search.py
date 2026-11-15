@@ -19,6 +19,8 @@ class APITransport:
         self.last = {}
 
     def get(self, provider, url, response_format='json', **kwargs):
+        from .social import is_linkedin
+        if is_linkedin(url):raise ProviderError('LinkedIn URLs require manual review; no automatic requests')
         for attempt in range(3):
             self.sleep(max(0, self.interval - (self.clock() - self.last.get(provider, -1e9))))
             self.last[provider] = self.clock()
