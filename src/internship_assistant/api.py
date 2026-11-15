@@ -8,7 +8,7 @@ from .sources import discover, monitor
 from .integrations import notify, sheet_sync, recommendation
 from . import applications
 
-app = FastAPI(title='AI Internship Assistant', version='0.2.0')
+app = FastAPI(title='AI Internship Assistant', version='0.3.0')
 lock = Lock()
 
 def auth(authorization: str = Header(default='')):

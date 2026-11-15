@@ -13,8 +13,12 @@ def load_demo(store):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['demo','discover','monitor','notify','sync','discovery-status','discovery-candidates'])
+    parser.add_argument('command', choices=['demo','discover','monitor','notify','sync','discovery-status','discovery-candidates','free-source-check'])
     args = parser.parse_args()
+    if args.command == 'free-source-check':
+        from .free_sources import check_free_sources
+        print(json.dumps(check_free_sources(),indent=2,ensure_ascii=False))
+        return
     store = Store()
     try:
         if args.command in ('discover','monitor') and demo():

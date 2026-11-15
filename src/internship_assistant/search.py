@@ -18,12 +18,19 @@ class APITransport:
         self.interval, self.sleep, self.clock = max(1, interval), sleep, clock
         self.last = {}
 
-    def get(self, provider, url, **kwargs):
+    def get(self, provider, url, response_format='json', **kwargs):
         for attempt in range(3):
             self.sleep(max(0, self.interval - (self.clock() - self.last.get(provider, -1e9))))
             self.last[provider] = self.clock()
             try:
-                response = self.client.get(url, **kwargs)
+                with self.client.stream('GET',url,**kwargs) as streamed:
+                    body=bytearray()
+                    for chunk in streamed.iter_bytes():
+                        body.extend(chunk)
+                        if len(body)>12_000_000:
+                            raise ProviderError(f'{provider}: public resource exceeds 12 MB')
+                    headers={k:v for k,v in streamed.headers.items() if k.lower() not in ('content-encoding','content-length')}
+                    response=httpx.Response(streamed.status_code,headers=headers,content=bytes(body),request=streamed.request)
             except httpx.HTTPError:
                 if attempt == 2:
                     raise ProviderError(f'{provider}: transport failure') from None
@@ -45,6 +52,12 @@ class APITransport:
                 continue
             if response.status_code != 200:
                 raise ProviderError(f'{provider}: HTTP {response.status_code}')
+            if len(response.content) > 12_000_000:
+                raise ProviderError(f'{provider}: public resource exceeds 12 MB')
+            if response_format == 'bytes':
+                return response.content
+            if response_format == 'text':
+                return response.text
             try:
                 return response.json()
             except ValueError:
@@ -59,10 +72,16 @@ class BraveSearch:
         self.transport = transport
 
     @property
+    def enabled(self):
+        return os.getenv('ENABLE_BRAVE_SEARCH','false').lower() == 'true'
+
+    @property
     def available(self):
-        return bool(os.getenv('BRAVE_SEARCH_API_KEY'))
+        return self.enabled and bool(os.getenv('BRAVE_SEARCH_API_KEY'))
 
     def search(self, task, page, count):
+        if not self.enabled:
+            raise ProviderError('brave: optional provider disabled')
         if not self.available:
             raise ProviderError('brave: missing BRAVE_SEARCH_API_KEY')
         data = self.transport.get(self.name, 'https://api.search.brave.com/res/v1/web/search',
@@ -113,6 +132,30 @@ class WikidataSearch:
 
 
 def query_tasks(config, provider):
+    if provider == 'overpass':
+        return [{'query':'Public organization inventory '+city+' '+json.dumps(config.get('city_bounds',{}).get(city)), 'location':city}
+                for city in config['locations'] if city in config.get('city_bounds',{})]
+    if provider == 'public_sources':
+        scope={key:config.get(key) for key in ('locations','location_aliases','include_remote_leads')}
+        return [{'query':'Public source ' + json.dumps({'source':source,'scope':scope},sort_keys=True,ensure_ascii=False), 'source':source, 'location':'Unknown'}
+                for source in config.get('free_sources',[]) if source.get('enabled',True)]
+    if provider == 'wikimedia':
+        tasks=[{'query':target,'language':language,'location':target}
+               for target in config['priority_targets'] for language in config.get('languages',['en','ar'])]
+        company=[]
+        for sector in config['sectors']:
+            for city in config['locations']:
+                for language in config.get('languages',['en','ar']):
+                    aliases=config.get('location_aliases',{}).get(city,[])
+                    local=next((a for a in aliases if any('\u0600'<=ch<='\u06ff' for ch in a)),city) if language=='ar' else city
+                    company.append({'query':f'{local} {sector}','language':language,'location':city})
+        internships=[{'query':f'{city} {field} {term}','language':language,'location':city}
+                     for term in config['internship_terms'] for field in config['fields']
+                     for city in config['locations'] for language in config.get('languages',['en','ar'])]
+        for i in range(max(len(company),len(internships))):
+            if i<len(company): tasks.append(company[i])
+            if i<len(internships): tasks.append(internships[i])
+        return tasks
     if provider == 'wikidata':
         return [{'query':'Organizations with listed websites in ' + city, 'location':city} for city in config['locations']]
     tasks = [{'query':f'"{target}" official careers internship', 'location':target} for target in config['priority_targets']]

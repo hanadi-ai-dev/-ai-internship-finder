@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-11-15
+
+- Made credential-free public_sources/Wikidata/Wikimedia/Overpass discovery the default; Brave now requires explicit enablement, configuration and credentials.
+- Kept hosted AI off by default even when old keys exist; added bilingual local relevance and Arabic location/sector aliases.
+- Added published directory archive and community internship table adapters, RSS/Atom parsing/discovery, and official-linked Greenhouse/Lever anonymous read APIs.
+- Added safe archive/XML/YAML handling, in-run caching, per-language cursors, source statistics and a read-only free-source-check command.
+- Integrated attributed unverified leads with existing tracking/Sheets/Telegram; protected stronger verification from lower-trust imports. Email defaults remain disabled.
+- Live public GitHub snapshots parsed 876 company profiles / 1,450 internship rows; strict local filters yielded zero. Other probed public APIs/feeds were blocked by environment egress. No invented local results or live application sends.
+- Added zero-cost strategy, source expansion and live-validation documentation, plus automated free-source tests.
+
 ## 0.2.0 — 2026-11-15
 
 - Extended the existing service with official Brave Search and credential-free Wikidata directory adapters; configurable sector/location/technical internship queries and priority targets.

@@ -20,7 +20,7 @@ from internship_assistant.api import app
 @pytest.fixture
 def config():
     c = load_config()
-    c.update(locations=['Jeddah','Riyadh'],sectors=['bank','hospital'],fields=['AI'],internship_terms=['COOP'],
+    c.update(providers=['wikidata','brave'],locations=['Jeddah','Riyadh'],sectors=['bank','hospital'],fields=['AI'],internship_terms=['COOP'],
              priority_targets=['KAUST Thuwal','KACST Riyadh','Wadi Jeddah'],extra_queries=[],
              search_requests_per_run=2,pages_per_run=10)
     return c
@@ -77,6 +77,7 @@ def test_query_coverage(config):
 
 
 def test_brave_official_api_auth_pagination(monkeypatch):
+    monkeypatch.setenv('ENABLE_BRAVE_SEARCH','true')
     monkeypatch.setenv('BRAVE_SEARCH_API_KEY','fixture-key-not-real')
     def handler(request):
         assert request.url.host == 'api.search.brave.com'
@@ -145,6 +146,7 @@ def test_incremental_query_rotation_and_persisted_pages(store,config):
 
 
 def test_missing_brave_is_explicit_and_fallback_still_runs(store,config,monkeypatch):
+    monkeypatch.setenv('ENABLE_BRAVE_SEARCH','true')
     monkeypatch.setattr('internship_assistant.discovery.sources',lambda:[])
     monkeypatch.delenv('BRAVE_SEARCH_API_KEY',raising=False)
     wiki = FakeProvider([])

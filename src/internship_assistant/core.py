@@ -122,6 +122,10 @@ class Store:
                         break
         source_urls = set(item.get('source_urls', [])) | {item['source_url']}
         if previous:
+            if (item.get('discovery_method') == 'free_public_source' and not item.get('source_trusted') and
+                (previous.get('discovery_method') != 'free_public_source' or previous.get('source_trusted'))):
+                # A community/feed refresh may add provenance, never downgrade stronger evidence.
+                item = dict(previous)
             source_urls.update(previous.get('source_urls', [previous['source_url']]))
             for key in ('status', 'follow_up'):
                 if key in previous:

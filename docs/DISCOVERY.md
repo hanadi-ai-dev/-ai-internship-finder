@@ -1,4 +1,6 @@
-# Automated discovery (0.2)
+# Automated discovery (0.3)
+
+The default profile is now completely credential-free discovery with local bilingual analysis. Read [FREE_DISCOVERY.md](FREE_DISCOVERY.md) for the free strategy, current adapters and actual live-check results. Optional paid integrations are not required.
 
 This extends the original application; it does not replace the tracked database or require another service. Every discovery run searches configured providers, stages candidate URLs, then verifies a bounded set of due pages. No email action is part of discovery. All demo runs remain offline.
 
@@ -6,7 +8,9 @@ This extends the original application; it does not replace the tracked database 
 
 | Provider | What it does | Credentials and limitations |
 | --- | --- | --- |
-| Brave Web Search API | Searches official public API for company/sector/location queries and Summer/COOP/research/general technical internship queries, including Arabic terms | `BRAVE_SEARCH_API_KEY`; check current plan/pricing/quota. Key absent → explicit `missing_credentials`, no simulated search results |
+| Brave Web Search API (optional; disabled by default) | Searches official public API for company/sector/location queries and Summer/COOP/research/general technical internship queries, including Arabic terms | `BRAVE_SEARCH_API_KEY`; check current plan/pricing/quota. Key absent → explicit `missing_credentials`, no simulated search results |
+| Wikimedia search + entity lookup | Anonymous English/Arabic article search and Wikidata website properties | No account, billing or key; bounded queries and separate language cursors |
+| Public sources | Published directory/company archives, community internship lists and RSS/Atom; employer-linked Greenhouse/Lever read APIs | No account, billing or key. Third-party assertions stay unverified; see FREE_DISCOVERY.md |
 | Wikidata Query Service | Credential-free CC0 organization directory: organizations with a listed website and headquarters/administrative location in configured cities | No key. Sparse and community-maintained; not a full web index or vacancy search. Website association is a Wikidata claim until independently reviewed |
 | Configured/reviewed sources | Priority/manual targets in `config/sources.json` and the existing explicit opportunity monitor | Useful supplement when providers are unavailable. Never presented as a successful broad search |
 
@@ -17,8 +21,8 @@ Wikidata queries resolve configured English city labels rather than maintaining 
 ## Setup and commands
 
 1. Keep `EMAIL_SENDING_ENABLED=false` and `EMAIL_AUTO_APPROVED=false`.
-2. Review `config/discovery.json`. Optionally configure `BRAVE_SEARCH_API_KEY` securely. Do not put the key in JSON or commit `.env`.
-3. Ensure egress permits `api.search.brave.com`, `query.wikidata.org`, and the official/linked domains selected for collection. Restricted environments need per-host grants; a search API grant does not allow arbitrary result sites. Local Python DNS must resolve public source domains for SSRF validation; HTTP proxy-only DNS does not satisfy that check. Use a normal DNS-capable runtime or infrastructure-supported public DNS resolution rather than disabling validation.
+2. Review `config/discovery.json`; free defaults are public_sources, wikidata, wikimedia and overpass. Keep ENABLE_BRAVE_SEARCH=false and AI_PROVIDER=local. Do not put any optional credentials in JSON or commit .env.
+3. Ensure egress permits the configured free API/directory hosts (see FREE_DISCOVERY.md) and the official/linked domains selected for collection. Restricted environments need per-host grants; a search API grant does not allow arbitrary result sites. Local Python DNS must resolve public source domains for SSRF validation; HTTP proxy-only DNS does not satisfy that check. Use a normal DNS-capable runtime or infrastructure-supported public DNS resolution rather than disabling validation.
 4. Export variables for CLI (CLI does not read `.env`), or restart only your assistant Compose service after editing its env_file. Never change existing n8n containers.
 
 ```bash
@@ -31,7 +35,7 @@ DEMO_MODE=false .venv/bin/internships monitor
 
 Equivalent authenticated API: `POST /discover`, `GET /discovery/status`, `GET /discovery/candidates?limit=100`, `POST /monitor`. Candidate limit is 1..1000. `GET /companies` includes outreach targets. A run report includes provider request/hit/status counters, pages fetched vs pages verified, company/opportunity upserts, errors, queue states, and budget exhaustion. Inspect these rather than treating HTTP 200 as proof of live success. Provider/parse failures preserve existing data. Candidate `error`/`needs_review` states are visible in both API and Sheets. `last_attempt` never substitutes for `verified_at`.
 
-`status: partial` means a provider is unavailable or a source failed. Missing Brave credentials does not block independent Wikidata/seed collection. An empty result can be legitimate and is never filled with demo data. If both APIs are unavailable, existing reviewed targets may still refresh, but broad search has not succeeded. If there is no network at all, the report records errors and no page verification timestamps.
+`status: partial` means a provider is unavailable or a source failed. Brave is absent from the default providers and never needs credentials in free mode. Explicitly enabling it is outside that profile. Missing optional credentials never block independent free collection. An empty result can be legitimate and is never filled with demo data. When public APIs are unavailable, independently reachable directory snapshots, feeds and targets may still refresh; reports distinguish these successes from blocked API searches. If there is no network at all, the report records errors and no page verification timestamps.
 
 ## Configuration reference
 
@@ -39,15 +43,19 @@ Equivalent authenticated API: `POST /discover`, `GET /discovery/status`, `GET /d
 
 | Setting | Behavior |
 | --- | --- |
-| providers | Enabled names: `wikidata`, `brave`; `[]` intentionally runs only the reviewed-source frontier |
+| providers | Default public_sources, wikidata, wikimedia, overpass; optional brave additionally needs explicit ENABLE_BRAVE_SEARCH=true. [] runs only the configured frontier |
+| free_sources | Published github_directory, internship_table or feed source descriptors; name, kind, HTTPS URL, attribution_url and enabled |
+| languages / location_aliases | English/Arabic queries and geographic matches, including Jeddah/Jidda/جدة, Riyadh/الرياض, Thuwal/ثول/KAUST |
+| include_remote_leads | false by default; opt-in to explicit worldwide leads without claiming Saudi eligibility |
+| city_bounds | Approximate Overpass inventory boxes in south/west/north/east order; bounded area, claims unverified |
 | locations | English city labels and search locations; defaults Jeddah, Riyadh, Thuwal |
 | sectors | Broad company search terms across startups, SMEs, corporations, government, banks, hospitals, research, universities, retail, logistics, energy, telecom; extend freely |
 | fields | Technical search terms; defaults AI, Data Science, ML, Software, IT, Cybersecurity |
 | internship_terms | Summer, COOP, research, unspecified internships, Arabic summer/COOP terms |
-| priority_targets | First Brave queries; initial three priority organizations also remain reviewed seed targets |
+| priority_targets | First free Wikimedia and optional Brave queries; initial organizations remain configured research targets |
 | extra_queries | Additional public search queries, e.g. Arabic sector terms or authoritative directories |
-| search_requests_per_run | Total provider requests budget (not per provider); default 6, max 50 |
-| results_per_page / max_pages_per_query | Results per request and bounded API pagination; default 10/3; Brave offsets limited to 0..9 |
+| search_requests_per_run | Logical provider query budget across all providers; default 6, max 50. Wikimedia may make two HTTP reads per query; rate limits apply to each read |
+| results_per_page / max_pages_per_query | Results per request and bounded API pagination; default 10/3 for web searches; Brave offsets limited to 0..9. Free inventories retain cursors until exhausted |
 | search_refresh_hours | Completed query TTL (24h); unfinished pagination rotates fairly with other tasks |
 | provider_interval_seconds | Per-provider minimum request spacing; default 2s, minimum 1s |
 | pages_per_run / links_per_page / max_depth | Frontier page, fanout and crawl-depth budgets; defaults 12/12/3 |
@@ -94,3 +102,5 @@ Notification fingerprints omit verification timestamps, source-list growth, trac
 Implement `name`, `available`, and `search(task, page, count) -> (hits, more)` like `BraveSearch`/`WikidataSearch`. Use the shared APITransport for retries/rate limits and sanitized errors. Hits contain public URL, title, provider, query/location hint, and `authority: unverified` by default. Only explicit independently sourced website properties should use a stronger claim label; do not mark every search result official. Register the provider in `run_discovery` and config validation, extend `query_tasks`, document keys/endpoints/terms/quota, and add MockTransport contract tests and failure tests.
 
 For source adapters, keep Fetcher's public HTTPS/robots limits, attach exact evidence, and stage uncertain results. Test ambiguous dates, missing job identifiers, shared ATS mismatches, cross-source aliases, new cohorts, duplicate notifications, source removal, redirects, missing credentials, backoff, and persistence. Preserve email-disabled defaults and never invoke real SMTP in development. For authenticated/JavaScript-only pages, report a limitation or use an official documented API; do not work around access controls.
+
+Free RSS/Atom, community table, directory archive and employer-board ingestion are detailed in FREE_DISCOVERY.md. Community/feed publication is evidence of an unverified lead, not official verification. Existing stronger evidence/statuses cannot be downgraded by these imports. Use `internships free-source-check` for read-only live source diagnostics; no local vacancy is implied by a successful source download.

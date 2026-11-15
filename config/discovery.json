@@ -1,7 +1,9 @@
 {
   "providers": [
+    "public_sources",
     "wikidata",
-    "brave"
+    "wikimedia",
+    "overpass"
   ],
   "locations": [
     "Jeddah",
@@ -20,7 +22,15 @@
     "retail",
     "logistics",
     "energy",
-    "telecommunications"
+    "telecommunications",
+    "شركات",
+    "شركات ناشئة",
+    "بنك",
+    "مستشفى",
+    "جهة حكومية",
+    "مركز أبحاث",
+    "جامعة",
+    "تقنية المعلومات"
   ],
   "fields": [
     "AI",
@@ -28,7 +38,13 @@
     "Machine Learning",
     "Software",
     "IT",
-    "Cybersecurity"
+    "Cybersecurity",
+    "الذكاء الاصطناعي",
+    "علم البيانات",
+    "تعلم الآلة",
+    "البرمجيات",
+    "تقنية المعلومات",
+    "الأمن السيبراني"
   ],
   "internship_terms": [
     "summer internship",
@@ -62,5 +78,61 @@
     "monitor_cron": "0 7 * * *",
     "notifications_cron": "0 8 * * *"
   },
-  "run_budget_seconds": 120
+  "run_budget_seconds": 120,
+  "languages": [
+    "en",
+    "ar"
+  ],
+  "location_aliases": {
+    "Jeddah": [
+      "Jidda",
+      "جدة"
+    ],
+    "Riyadh": [
+      "الرياض"
+    ],
+    "Thuwal": [
+      "KAUST",
+      "ثول",
+      "كاوست",
+      "جامعة الملك عبدالله"
+    ]
+  },
+  "include_remote_leads": false,
+  "free_sources": [
+    {
+      "name": "Remote In Tech (ISC public directory)",
+      "kind": "github_directory",
+      "url": "https://codeload.github.com/remoteintech/remote-jobs/zip/refs/heads/main",
+      "attribution_url": "https://github.com/remoteintech/remote-jobs",
+      "enabled": true
+    },
+    {
+      "name": "Pitt CSC & Simplify Summer 2027 community leads",
+      "kind": "internship_table",
+      "url": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/README.md",
+      "attribution_url": "https://github.com/SimplifyJobs/Summer2027-Internships",
+      "enabled": true
+    }
+  ],
+  "city_bounds": {
+    "Jeddah": [
+      21.2,
+      39.0,
+      21.9,
+      39.5
+    ],
+    "Riyadh": [
+      24.4,
+      46.3,
+      25.0,
+      47.0
+    ],
+    "Thuwal": [
+      22.2,
+      39.0,
+      22.4,
+      39.3
+    ]
+  }
 }

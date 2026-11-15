@@ -40,7 +40,8 @@ class Fetcher:
                     body.extend(chunk)
                     if len(body) > 2_000_000:
                         raise ValueError('Source exceeds 2 MB limit')
-                response = httpx.Response(streamed.status_code, headers=streamed.headers,
+                headers={k:v for k,v in streamed.headers.items() if k.lower() not in ('content-encoding','content-length')}
+                response = httpx.Response(streamed.status_code, headers=headers,
                                           content=bytes(body), request=streamed.request)
             if response.status_code not in (429, 500, 502, 503, 504):
                 break
@@ -66,7 +67,7 @@ class Fetcher:
             url = result
         raise ValueError('Too many source redirects')
 
-    def _page_once(self, url):
+    def _page_once(self, url, document=False):
         self.safe(url)
         p = urlsplit(url)
         origin = f'{p.scheme}://{p.netloc}'
@@ -93,11 +94,22 @@ class Fetcher:
             self.safe(target)
             return target  # Each redirect destination receives its own robots/SSRF checks.
         r.raise_for_status()
+        if document:
+            return r
         if 'text/html' not in r.headers.get('content-type', ''):
             raise ValueError('Expected HTML')
         page = BeautifulSoup(r.text, 'html.parser')
         page.source_url = url
         return page
+
+    def document(self, url):
+        """Read a published RSS/Atom/XML document using the same robots and redirect policy."""
+        for _ in range(6):
+            result = self._page_once(url,document=True)
+            if isinstance(result,httpx.Response):
+                return result.text
+            url = result
+        raise ValueError('Too many source redirects')
 
 def sources():
     with open(os.getenv('SOURCE_CONFIG', 'config/sources.json')) as f:

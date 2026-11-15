@@ -73,7 +73,7 @@ class DiscoveryStore:
             item['authority'] = hit['authority']
             item['organization_name'] = hit.get('title','')
         item.setdefault('authority','unverified')
-        for field in ('title','location_hint','sector','entity_id'):
+        for field in ('title','location_hint','sector','entity_id','resource','kind','company_name'):
             if hit.get(field) and not item.get(field):
                 item[field] = hit[field]
         if company:
@@ -81,7 +81,8 @@ class DiscoveryStore:
             had_company = bool(item.get('company_id'))
             item['company_id'] = company['id']
             item['depth'] = min(depth,item.get('depth',depth)) if row and had_company else depth
-            item['authority'] = 'official_link' if item['authority'] == 'unverified' else item['authority']
+            if item['authority'] == 'unverified':
+                item['authority'] = 'official_link' if company.get('authority') in ('reviewed','wikidata_website_claim') else 'company_link_unverified'
         next_check = row[1] if row else (now() if due else later(config['page_refresh_hours']))
         # A new trusted referral can rescue a previously unverified result immediately.
         promoted = (item['authority'] in ('reviewed','wikidata_website_claim') and item['authority'] != old_authority)

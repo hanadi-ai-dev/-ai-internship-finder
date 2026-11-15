@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .core import demo, now
 from .discovery_store import DiscoveryStore, host_key, url_key, later
 from .search import APITransport, BraveSearch, WikidataSearch, query_tasks, ProviderError
+from .free_sources import PublicSources, WikimediaSearch, OverpassDirectory, ats_resource, resource_hits
 from .extraction import organizations, page_links, public_contacts, extract_opportunities, structured, matching_employer, types
 from .sources import Fetcher, sources
 
@@ -33,12 +34,76 @@ def load_config():
         value = config.get(name)
         if not isinstance(value,list) or not all(isinstance(v,str) and 0 < len(v) <= 300 for v in value) or len(value) > 100:
             raise ValueError(f'Discovery config {name}: expected at most 100 nonempty strings')
-    if not config['locations'] or not set(config['providers']) <= {'wikidata','brave'}:
-        raise ValueError('Configure locations and only supported providers: wikidata, brave')
+    if not config['locations'] or not set(config['providers']) <= {'wikidata','wikimedia','public_sources','overpass','brave'}:
+        raise ValueError('Configure locations and supported providers: wikidata, wikimedia, public_sources, overpass, brave')
+    languages=config.get('languages',['en','ar'])
+    if not isinstance(languages,list) or not languages or set(languages) - {'en','ar'}:
+        raise ValueError('Supported discovery languages: en, ar')
+    if type(config.get('include_remote_leads',False)) is not bool:
+        raise ValueError('include_remote_leads must be a JSON boolean')
+    free=config.get('free_sources',[])
+    if not isinstance(free,list) or len(free)>100:
+        raise ValueError('free_sources must contain at most 100 published sources')
+    for source in free:
+        if (not isinstance(source,dict) or source.get('kind') not in ('github_directory','internship_table','feed') or
+            not isinstance(source.get('name'),str) or not source['name'] or not source.get('url','').startswith('https://')):
+            raise ValueError('Free sources require a supported kind and public HTTPS URL')
+        from .discovery_store import clean_url
+        clean_url(source['url'])
     combinations = len(config['locations']) * (len(config['sectors']) + len(config['fields']) * len(config['internship_terms']))
     if combinations + len(config['priority_targets']) + len(config['extra_queries']) > 10000:
         raise ValueError('Discovery query matrix exceeds 10,000 tasks; narrow configuration')
     return config
+
+
+def ingest_public_hit(state,hit,config,company=None,trusted=False):
+    """Retain published leads without relabeling them as verified official vacancies."""
+    if hit.get('kind') == 'company_lead':
+        previous=next((c for c in state.store.all('companies') if url_key(c['url'])==url_key(hit['url'])),{})
+        lead={'name':hit['company_name'],'url':hit['url'],'city':'Unknown','sector':hit.get('sector','Unknown'),
+            'location_hint':hit.get('location_hint','Unknown'),'authority':'directory_claim',
+            'verification_status':'Public directory lead; ownership, location and technical department unverified',
+            'technical_department':'Unknown; potential outreach target','provenance':[{
+                'provider':hit.get('provider','public_sources'),'source_url':hit['source_url'],
+                'attribution_url':hit.get('attribution_url',hit['source_url'])}],
+            'career_links':[hit['career_url']] if hit.get('career_url') else [],'last_discovered_at':now()}
+        for field in ('name','city','authority','verification_status','technical_department'):
+            if field in previous: lead[field]=previous[field]
+        company=state.store.company(lead)
+        if hit.get('career_url'):
+            resource=ats_resource(hit['career_url'])
+            state.enqueue({'url':hit['career_url'],'title':'Directory-listed careers','provider':'directory',
+                'source_url':hit['source_url'],**({'resource':resource} if resource else {})},config,company)
+    elif hit.get('kind') == 'opportunity_lead':
+        item={'company':hit.get('company_name') or 'Unknown employer (public feed lead)',
+            'title':hit['title'],'source_url':hit['source_url'],'city':hit.get('city','Unknown'),
+            'location_hint':hit.get('location_hint','Unknown'),'kind':kind_for_free(hit),
+            'eligibility':'Unknown','evidence':'','closes':'','opens':'','posted_at':hit.get('posted_at',''),
+            'external_id':hit.get('entry_id',''),'apply_url':hit.get('apply_url') or hit['url'],
+            'requirements':hit.get('requirements',''),'discovery_method':'free_public_source',
+            'source_trusted':trusted,
+            'verification_status':'Official-linked public recruitment source fetched' if trusted else 'Unverified public-source lead; official confirmation required',
+            'advertised_status':'Published listing; current availability and eligibility unconfirmed',
+            'attribution_url':hit.get('attribution_url',hit['source_url'])}
+        if company:
+            item.update(company=company['name'],company_id=company['id'],company_url=company['url'])
+        from .integrations import recommendation
+        try:
+            item['recommendation']=recommendation(item)
+        except Exception:
+            item['recommendation']={'method':'unavailable','explanation':'Analysis unavailable; published lead retained'}
+        state.store.upsert(item)
+    return state.enqueue(hit,config,company)
+
+
+def kind_for_free(hit):
+    from .extraction import kind_for
+    return kind_for(hit['title']+' '+hit.get('requirements',''))
+
+
+def search_task_id(name,task):
+    identity=task['query'] + ('\nlanguage=' + task['language'] if task.get('language') else '')
+    return 'search:' + name + ':' + hashlib.sha256(identity.encode()).hexdigest()
 
 
 def seed_frontier(state, config):
@@ -56,9 +121,10 @@ def run_search(state, config, providers, deadline=float('inf')):
     tasks = {}
     for name in config['providers']:
         provider = providers[name]
-        statuses[name] = {'status':'ready' if provider.available else 'missing_credentials','requests':0,'hits':0}
+        statuses[name] = {'status':'ready' if provider.available else ('disabled' if not getattr(provider,'enabled',True) else 'missing_credentials'),'requests':0,'hits':0}
         if not provider.available:
-            statuses[name]['detail'] = 'Set BRAVE_SEARCH_API_KEY securely; credential-free Wikidata remains independent'
+            statuses[name]['detail'] = ('Optional provider disabled; free discovery is independent' if not getattr(provider,'enabled',True)
+                else 'Optional provider credentials missing; default free sources need no key')
             continue
         tasks[name] = query_tasks(config,name)
     added = 0
@@ -70,13 +136,13 @@ def run_search(state, config, providers, deadline=float('inf')):
         name = names[slot % len(names)]
         options = []
         for rank, task in enumerate(tasks[name]):
-            id = 'search:' + name + ':' + hashlib.sha256(task['query'].encode()).hexdigest()
+            id = search_task_id(name,task)
             progress = state.state(id)
             if progress.get('next_check','') <= now():
                 options.append((progress.get('last_attempt',''),id,task,progress,rank))
         if not options:
             if not statuses[name]['requests']:
-                blocked = [state.state('search:' + name + ':' + hashlib.sha256(t['query'].encode()).hexdigest()) for t in tasks[name]]
+                blocked = [state.state(search_task_id(name,t)) for t in tasks[name]]
                 statuses[name]['status'] = 'cooldown' if any(p.get('error') for p in blocked) else 'not_due'
             continue
         _, id, task, progress, _ = min(options,key=lambda entry:(entry[0],entry[4]))
@@ -85,7 +151,7 @@ def run_search(state, config, providers, deadline=float('inf')):
             hits, more = providers[name].search(task,progress.get('page',0),config['results_per_page'])
             for hit in hits:
                 try:
-                    if state.enqueue(hit,config):
+                    if (ingest_public_hit(state,hit,config) if hit.get('kind') in ('company_lead','opportunity_lead') else state.enqueue(hit,config)):
                         added += 1
                 except (ValueError,TypeError):
                     # Unsupported/non-public URLs never become fetch targets.
@@ -93,7 +159,7 @@ def run_search(state, config, providers, deadline=float('inf')):
             statuses[name]['hits'] += len(hits)
             statuses[name]['status'] = 'ok'
             page = progress.get('page',0) + 1
-            complete = not more or page >= config['max_pages_per_query']
+            complete = not more or (name not in ('public_sources','overpass','wikidata') and page >= config['max_pages_per_query'])
             state.set_state(id,{'last_attempt':now(),'last_success':now(), 'page':0 if complete else page,
                                 'next_check':later(config['search_refresh_hours']) if complete else now(), 'query':task['query']})
         except Exception as e:
@@ -149,12 +215,27 @@ def identify_company(store, candidate, page, config):
 def process_frontier(state, config, fetcher, deadline=float('inf')):
     counts = {'pages_fetched':0, 'pages_verified':0, 'companies_updated':0, 'opportunities_upserted':0, 'needs_review':0}
     errors = []
+    resource_transport=APITransport(config['provider_interval_seconds'])
     # Bounded initial snapshot: newly discovered links are processed in the next incremental run.
     for candidate in state.candidates(config['pages_per_run'],due=True):
         if time.monotonic() >= deadline:
             break
         url = candidate['url']
         try:
+            if candidate.get('resource'):
+                company=_company_by_id(state.store,candidate.get('company_id'))
+                if not company:
+                    raise ValueError('Recruitment resource requires known employer context')
+                trusted=(company.get('authority') in ('reviewed','wikidata_website_claim') and
+                         candidate['resource'].get('official_referral') is True)
+                hits=resource_hits(candidate['resource'],company,resource_transport,fetcher,config)
+                for hit in hits:
+                    ingest_public_hit(state,hit,config,company,trusted)
+                counts['pages_fetched']+=1
+                counts['pages_verified']+=int(trusted)
+                counts['opportunities_upserted']+=len(hits)
+                state.finish(candidate,config,'verified' if trusted else 'needs_review')
+                continue
             page = fetcher.page(url)
             counts['pages_fetched'] += 1
             url = getattr(page, 'source_url', None) or url
@@ -193,8 +274,18 @@ def process_frontier(state, config, fetcher, deadline=float('inf')):
                     # External career links are trusted only when actually linked by a known employer.
                     if host_key(url) != host_key(company['url']) and host_key(link['url']) != host_key(url):
                         continue
+                    resource=ats_resource(link['url'])
+                    if resource:
+                        resource['official_referral']=trusted
                     state.enqueue(dict(link,provider='official-link' if trusted else 'self-identified-link',
-                        source_url=url,authority='unverified'),config,company,candidate.get('depth',0)+1)
+                        source_url=url,authority='unverified',**({'resource':resource} if resource else {})),config,company,candidate.get('depth',0)+1)
+                for feed in page.select('link[rel="alternate"][href]'):
+                    if feed.get('type') in ('application/rss+xml','application/atom+xml'):
+                        from .extraction import https_link
+                        target=https_link(url,feed['href'])
+                        if target:
+                            state.enqueue({'url':target,'title':'Published employer feed','provider':'official-feed-link',
+                                'source_url':url,'resource':{'kind':'feed','url':target,'official_referral':trusted}},config,company,candidate.get('depth',0)+1)
             opportunities = extract_opportunities(page,url,company,trusted,config['locations'])
             for item in opportunities:
                 try:
@@ -235,13 +326,16 @@ def run_discovery(store, config=None, providers=None, fetcher=None):
     seed_frontier(state,config)
     if providers is None:
         transport = APITransport(config['provider_interval_seconds'])
-        providers = {'brave':BraveSearch(transport),'wikidata':WikidataSearch(transport)}
+        providers = {'brave':BraveSearch(transport),'wikidata':WikidataSearch(transport),
+            'wikimedia':WikimediaSearch(transport),'public_sources':PublicSources(transport,config,fetcher or Fetcher()),
+            'overpass':OverpassDirectory(transport,config)}
     statuses, errors, hits = run_search(state,config,providers,deadline)
     counts, page_errors = process_frontier(state,config,fetcher or Fetcher(),deadline)
     errors.extend(page_errors)
     partial = bool(errors) or any(s['status'] in ('error','missing_credentials','cooldown') for s in statuses.values())
     return state.report({'demo':False,'status':'partial' if partial else 'ok','providers':statuses,
         'candidate_hits_processed':hits,**counts,'errors':errors,'queue':state.status()['candidate_counts'],
+        'source_statistics':getattr(providers.get('public_sources'),'statistics',{}),
         'budget_exhausted':time.monotonic() >= deadline,
         'queue_at_capacity':state.db.execute('SELECT count(*) FROM discovery_candidates').fetchone()[0] >= config['max_candidates']})
 
