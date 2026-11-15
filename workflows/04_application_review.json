@@ -1,0 +1,53 @@
+{
+  "name": "Internships \u2014 future application review (manual only)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "manual",
+      "name": "Manual review",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "list",
+      "name": "List application drafts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "url": "http://assistant:8000/applications",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual review": {
+      "main": [
+        [
+          {
+            "node": "List application drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Riyadh"
+  },
+  "tags": []
+}

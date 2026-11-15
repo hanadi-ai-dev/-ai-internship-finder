@@ -1,0 +1,19 @@
+# Deliberately contains no n8n service: existing n8n is untouched.
+services:
+  assistant:
+    build: .
+    env_file: .env
+    ports:
+      - "127.0.0.1:${ASSISTANT_PORT:-8018}:8000"
+    volumes:
+      - assistant-data:/app/data
+      - ./config:/app/config:ro
+      - ./secrets:/app/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  assistant-data:

@@ -1,0 +1,5 @@
+[
+  {"name":"KAUST", "city":"Thuwal", "sector":"Research", "url":"https://www.kaust.edu.sa/", "priority":1},
+  {"name":"KACST", "city":"Riyadh", "sector":"Research and government", "url":"https://www.kacst.edu.sa/", "priority":1},
+  {"name":"Wadi Jeddah", "city":"Jeddah", "sector":"Innovation", "url":"https://wadijeddah.com.sa/", "priority":1}
+]

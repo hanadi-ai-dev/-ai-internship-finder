@@ -1,0 +1,14 @@
+.git
+.venv
+.env
+secrets
+__pycache__
+.pytest_cache
+*.egg-info
+data/*.sqlite*
+data/*.log
+data/*-result.json
+data/notification-preview.json
+attachments
+*.pdf
+*.docx

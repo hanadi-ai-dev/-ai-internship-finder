@@ -1,0 +1,4 @@
+[
+  {"company":"DEMO Research Organization", "title":"DEMO AI Summer Internship", "city":"Jeddah", "kind":"Summer", "eligibility":"Unknown", "source_url":"https://example.invalid/demo", "apply_url":"", "email":"", "email_kind":"", "opens":"", "closes":"", "requirements":"Synthetic demonstration only; not an actual vacancy.", "evidence":"", "status":"Not Applied"},
+  {"company":"DEMO Technology Organization", "title":"DEMO COOP Data Internship", "city":"Riyadh", "kind":"COOP", "eligibility":"Unknown", "source_url":"https://example.invalid/coop", "apply_url":"", "email":"", "email_kind":"", "opens":"", "closes":"", "requirements":"Synthetic demonstration only.", "evidence":"", "status":"Not Applied"}
+]

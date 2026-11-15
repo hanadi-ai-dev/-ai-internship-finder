@@ -1,0 +1,11 @@
+# Opt-in: attach ONLY the new assistant to a pre-existing user-defined n8n network.
+services:
+  assistant:
+    networks:
+      n8n-existing:
+        aliases:
+          - assistant
+networks:
+  n8n-existing:
+    external: true
+    name: ${N8N_NETWORK:?Set N8N_NETWORK to an existing user-defined n8n network}
